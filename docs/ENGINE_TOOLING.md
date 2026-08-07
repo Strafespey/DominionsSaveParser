@@ -1,0 +1,145 @@
+# Driving the Dominions 6 engine as a data source
+
+`Dominions6.exe` carries a number of undocumented switches that dump internal
+data. Some are far more reliable than reverse-engineering the binary format,
+so the toolchain uses the engine as a data source wherever it can.
+
+## Running headless
+
+The executable is a **GUI-subsystem** binary, but it writes to inherited
+redirected handles, so `subprocess` with `capture_output=True` works.
+
+Always pass `--nosteam --nocrashbox` (no Steam handshake, no modal crash box).
+
+`--textonly` is **not** a general headless mode. The engine rejects it unless
+combined with one of `--tcpserver`, `--tcpquery`, `--makemap`, `--newgame` or
+`--host`:
+
+```
+Något gick fel!
+Text only mode can only be used with --tcpserver, --tcpquery, --makemap, --newgame or --host
+```
+
+## Environment variables
+
+Read by the engine (found in its string table):
+
+| Variable | Purpose |
+|---|---|
+| `DOM6_SAVE` | savedgames root — **use this to sandbox** |
+| `DOM6_DATA` | data directory |
+| `DOM6_CONF` | config directory |
+| `DOM6_MODS` | mods directory |
+| `DOM6_LOCALMAPS` | local maps directory |
+
+`DOM6_SAVE` is what makes safe experimentation possible: point it at a temp
+copy of a savegame and the engine will never touch the real one.
+
+## Safe read-only dump switches
+
+These print and exit without touching a savegame. All are wired up in
+`dom6.engine.Engine` and `scripts/extract_reference.py`.
+
+| Switch | Output | Verified yield |
+|---|---|---|
+| `--listnations` | `id  Name, Subtitle`, grouped by era | 103 nations |
+| `--listspells` | `id  Spell Name` | 1473 spells |
+| `--listevents` | `id  event text` (with `##godname##` placeholders) | 3302 events |
+| `--comsumrits` | TSV: path, level, cost, ints, unit, ritual name | 146 rituals |
+| `--help` | full switch list | — |
+| `--version` | version string | — |
+
+`--listbless` and `--liststartarmy` produced no output — they probably need a
+nation argument.
+
+Note the output is UTF-8 (`Pyrène`), so decode explicitly rather than relying
+on the console codepage.
+
+## `--dumpfights` — battle rosters ⚠️ mutates the save
+
+`--dumpfights` only takes effect while the engine **hosts a turn**, which
+advances the game. Always run it against a copy (`dom6.engine.SandboxedHost`
+does this: it copies the folder to a temp dir and points `DOM6_SAVE` at it).
+
+```
+Dominions6.exe --nosteam --nocrashbox --textonly --vcrdebug --dumpfights --host <GameName>
+```
+
+Output shape:
+
+```
+Pangaea attacking Independents in Henwood with PD 0 (poptype 77)
+attstr 1557, defstr 367 (PDstr 0)
+commanders:
+   1+0 Centaur Commander
+units:
+  12+0 Satyr
+   8+0 Minotaur
+commanders:
+   1+0 Atavi Chieftain
+units:
+  29+0 Atavi Archer
+```
+
+What it gives you: every battle that turn, both sides' commanders and units
+with counts, and the engine's own attack/defence strength estimates.
+
+What it does **not** give you: any per-hit detail. It is a roster dump.
+
+### Caveats
+
+1. **Roster lag — confirmed and corrected.** Roster blocks lag their header
+   line by exactly one battle: the first header is followed by empty rosters,
+   and each later header is followed by the *previous* battle's roster.
+   Confirmed across two hosts that emitted battles in different orders (a
+   "Phaeacia attacking …" header was followed by Ulm's units, belonging to the
+   preceding "Ulm attacking …" battle). `parse_dumpfights(align=True)` — the
+   default — undoes the shift; after alignment every attacker roster matches
+   its nation's units. Unavoidable consequence: **the final battle of a host
+   never gets a roster printed**, flagged as `rosters_missing`.
+
+2. **⚠️ This dumps the NEXT turn's battles, freshly simulated — it is not a
+   replay of the battles already in your `.trn`.** Hosting consumes
+   `ftherlnd` + the `.2h` orders and generates the *upcoming* turn. Re-running
+   it produces **different results each time**: across two runs of the same
+   savegame, Ulm attacked Dragon Ridge in one and Ebys in the other, and
+   Mictlan's attack strength went from 1497 to 1640. AI orders and random
+   outcomes are re-rolled per host.
+
+   So for *"why did I lose the battle I just watched?"* — a battle in the past —
+   `--dumpfights` is the **wrong tool**. That battle lives in the `.trn` as a
+   `_vcr_VCR` record (see `FILE_FORMAT.md`). `--dumpfights` is useful for
+   *forecasting*: "what is about to happen given my current orders", and for
+   sampling outcome variance by hosting the same turn repeatedly.
+
+3. **Information scope.** Hosting dumps *every* nation's battles, not just
+   yours. Fine for solo play; more than a player should see in live multiplayer.
+
+The meaning of the `N+M` count format (e.g. `12+0 Satyr`) is not yet established.
+
+## Other switches worth investigating
+
+| Switch | Note |
+|---|---|
+| `--vcrtest`, `--vcrseed=`, `--vcrrepeat` | replay-system test harness |
+| `--vcrdebug` (`-dd`) | replay debug output |
+| `--simulation`, `--simnat=`, `--simamount=`, `--simspells` | built-in battle simulator — a route to "what if" analysis |
+| `--statusdump` | writes `<save>/<game>/statusdump.txt` |
+| `--statfile` | writes `stats.txt` after each turn |
+| `--scoredump` | writes `scores.html` after each turn |
+| `-d` | increase debug level (repeatable) |
+
+The engine also references `%s/%d_%d.vcr` and `%s/5_0.vcr` file paths, plus a
+`%s/tmp_vpb` temp file used by `ViewProvinceBattles`. No `.vcr` files exist on
+disk during normal play — replays live inside the `.trn`.
+
+## The stat tables are not dumpable
+
+Unit, weapon and armour stats are compiled into the executable; no switch
+exposes them. The `data/` folder ships only art assets (`.tga`, `.obj`,
+`.trs` sprite archives). The executable *does* contain every unit, item, spell
+and nation **description** as plain ASCII, so the numeric tables are adjacent
+and extractable — but that is a separate reverse-engineering job.
+
+This matters because tactical advice like *"your light infantry took free hits
+from long weapons"* needs weapon **length** values, which live in those tables.

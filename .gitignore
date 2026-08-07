@@ -1,0 +1,26 @@
+# Generated game database and extracted corpora
+/data/reference/
+/data/manual/
+/data/exe/
+
+# Sandboxes and scratch output
+/sandbox/
+/out/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store
