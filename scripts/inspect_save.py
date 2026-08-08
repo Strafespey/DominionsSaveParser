@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -129,12 +130,19 @@ def inspect_file(path: Path, args) -> int:
             if b.units:
                 print(f"      combatants          : {len(b.units)} "
                       f"@0x{b.units_offset or 0:08x}")
+                squads = b.squads()
                 for owner, side in sorted(b.order_of_battle().items()):
                     label = nations.get(owner, "Independents" if owner == 0 else f"nation {owner}")
                     print(f"        {label.split(',')[0]} "
                           f"({side['commanders']} cmd, {side['units']} units)")
-                    for t, n in side["by_type"].most_common():
-                        print(f"            {n:4d} x {monster_label(t)}{loadout(t)}")
+                    for (o, sid), members in squads.items():
+                        if o != owner:
+                            continue
+                        tag = "commanders" if sid == 0xFFFF else f"squad {sid}"
+                        print(f"          {tag} ({len(members)}):")
+                        counts = Counter(m.type_id for m in members)
+                        for t, n in counts.most_common():
+                            print(f"            {n:4d} x {monster_label(t)}{loadout(t)}")
             else:
                 print("      combatants          : none found "
                       "(assassination replays are not decoded yet)")

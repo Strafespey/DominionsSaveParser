@@ -67,6 +67,23 @@ class VcrSection:
     units: list[VcrUnit] = field(default_factory=list)
     units_offset: int | None = None
 
+    def squads(self) -> dict[tuple[int, int], list[VcrUnit]]:
+        """Combatants grouped by (owner, squad id), commanders under 0xFFFF.
+
+        Squads are the unit of battlefield organisation in Dominions: a squad
+        deploys together and carries one formation and one set of battle
+        orders. Mounts inherit their rider's squad, so a cavalry squad shows
+        twice as many members as riders.
+
+        Note that the per-unit x/y position is NOT stored in the replay -- the
+        engine recomputes deployment from squad, formation and orders at battle
+        start. See docs/FILE_FORMAT.md.
+        """
+        out: dict[tuple[int, int], list[VcrUnit]] = {}
+        for u in self.units:
+            out.setdefault((u.owner, u.link), []).append(u)
+        return dict(sorted(out.items()))
+
     def order_of_battle(self) -> dict[int, dict[str, object]]:
         """Per-nation breakdown: commander count and units grouped by type id."""
         out: dict[int, dict[str, object]] = {}
@@ -128,7 +145,8 @@ UNIT_RECORD_SIZE = 173
 #: by field plausibility instead.
 _OFF_UNIT_TURNSTAMP = 27
 
-_OFF_UNIT_LINK = 20  # u16, 0xFFFF on commanders
+_OFF_UNIT_SQUAD = 20  # u16 squad id, 0xFFFF on commanders
+_OFF_UNIT_LINK = _OFF_UNIT_SQUAD  # backwards-compatible alias
 _OFF_UNIT_TYPE = 23  # u16, monster type id  [verified]
 _OFF_UNIT_OWNER = 55  # u8, owning nation id [verified]
 _OFF_UNIT_NUMBER = 164  # u16, per-game unit number
@@ -154,12 +172,19 @@ class VcrUnit:
     type_id: int
     owner: int  #: nation id; 0 == independents
     unit_number: int
-    link: int  #: 0xFFFF on commanders; exact meaning unconfirmed
+    #: Squad id; 0xFFFF marks a commander (commanders are not in a squad).
+    #: Verified: grouping by this field reproduces the roster stacks exactly
+    #: (15 Archer / 26 Militia / 22 Light Infantry as three separate squads).
+    link: int
     raw: bytes = field(repr=False, default=b"")
 
     @property
+    def squad_id(self) -> int | None:
+        return None if self.is_commander else self.link
+
+    @property
     def is_commander(self) -> bool:
-        """Commanders carry 0xFFFF in the link field.
+        """Commanders carry 0xFFFF in the squad field.
 
         Verified: this selected exactly the 4 commanders (1 Bandar Log +
         3 Independent) that `--dumpfights` reported for the same battle.

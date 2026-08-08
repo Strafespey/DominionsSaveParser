@@ -145,11 +145,28 @@ that same host wrote.
 
 | Offset | Type | Meaning |
 |---|---|---|
-| `+20` | u16 | `0xFFFF` on commanders ✅; other values unexplained ❓ |
+| `+19` | u8 | constant within a squad ❓ |
+| `+20` | u16 | ✅ **squad id**; `0xFFFF` marks a commander |
 | `+23` | u16 | ✅ **monster type id** |
 | `+27` | u8 | file-global stamp — see warning below |
+| `+29` | u8 | constant per side ❓ |
 | `+55` | u8 | ✅ **owner nation id** (`0` = independents) |
 | `+164` | u16 | unit number 🟡 |
+
+Grouping by `+20` reproduces the roster stacks exactly, which is what confirms
+it as the squad id:
+
+```
+owner  0 squad   18:  15 Archer
+owner  0 squad   35:  26 Militia
+owner  0 squad   63:  22 Light Infantry
+owner  0 squad 65535:   3 Commander            <- commanders
+owner 68 squad 5048:  12 Tiger Rider + 12 Armored Sacred Tiger
+owner 68 squad 5063:  30 Atavi Infantry + 24 Vanara Infantry
+```
+
+Note squad 5048: **mounts inherit their rider's squad**, so a cavalry squad
+reports twice as many members as riders.
 
 Verification, battle in "The Mire of Mystery": 145 records split
 **79 Bandar Log / 66 Independents** by `+55`, and grouped by `+23` as:
@@ -171,6 +188,35 @@ pairing. `+20 == 0xFFFF` selected exactly the 4 commanders the roster reported.
 > same value appears in the replay header. Anchoring on a hard-coded value
 > silently finds nothing in other files. Records are located by field
 > plausibility, requiring a run to share whatever stamp its first record has.
+
+### Battlefield placement is NOT in the replay ❌
+
+Searched for and **not found**. Recording the negative result so it is not
+re-investigated:
+
+- **No per-unit x/y in the combat record.** Every field that separates cleanly
+  by owner turned out to be one already identified (`+20` squad, `+23` type,
+  `+164` unit number). Nothing in the 173 bytes behaves like a coordinate.
+- **No squad position table before the unit array.** The ~47 KB preceding the
+  array in one replay contains none of that battle's squad ids
+  (`18, 35, 63, 5048, 5063`) — a single coincidental match for `35` aside.
+
+The most likely explanation is that Dominions **recomputes deployment** at
+battle start from squad composition, formation and battle orders, all of which
+are deterministic given the stored seed. The engine's own strings support this:
+`Box formation`, `Line formation`, `Skirmish formation`, sparse line, and
+*"Units with the Guard Commander order always deploy next to the commander they
+are guarding."*
+
+So the squad layout the player arranges on the army-setup screen persists with
+the **army**, not with the battle. To recover front/back placement, map the
+army records in the `.trn` / `.2h` (squad definitions with their placement and
+formation) rather than looking inside the replay.
+
+What *is* available today from the replay: full squad composition per side,
+which unit types are grouped together, and each type's weapons with reach and
+range — enough to reason about reach mismatches and missile duels without
+knowing exact coordinates.
 
 ### Locating arrays outside replays 🟡
 
