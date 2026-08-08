@@ -154,5 +154,40 @@ to derive it (17 Archer, 30 Militia, 428 Assassin, 3550 Armored Sacred Tiger,
 …). If validation fails it raises rather than returning wrong names, so a game
 patch that moves the table produces a clear error instead of silent garbage.
 
-Weapon and armour tables — which hold the **length** values that repel and
-free-hit analysis depend on — are not extracted yet.
+**The weapon table is extracted** too — 887 weapons, stride 152 bytes, ids
+following Dominions' documented numbering (`0` Nothing, `1` Spear, `2` Pike).
+
+| Field | Offset | Notes |
+|---|---|---|
+| name | `+0` | inline, NUL-terminated |
+| **length** | `+54` | melee reach; `0xFF` on natural weapons |
+| **range** | `+56` | missile range; `0xFF`/`0xFD` = strength-derived |
+
+Validated against the manual, which states *"a human (size 3) wielding a mace
+(length 1)"* — the extracted Mace length is exactly 1. Ranges corroborate
+independently: Sling 30, Short Bow 35, Crossbow 40, Long Bow 45, Arbalest 50.
+Spear 3, Long Spear 4, Pike 5, Dagger 0.
+
+Natural weapons (claws, bites) store `0xFF`; the manual describes them as
+"weapon length zero", so it is a sentinel rather than a length of 255. They are
+exposed as `length is None` with `effective_length == 0`.
+
+> Caveat: `+54` is only meaningful for ordinary weapons. Special attacks
+> ("Hypnotize", "Spectral Fire", "Wail") also carry values there that are
+> unlikely to be reach. Trust it for physical weapons.
+
+**Armour** lives in a third table at stride 104 (Buckler, Kite Shield, Tower
+Shield were located) but is not extracted yet.
+
+### Why this matters
+
+The manual gives the repel rule outright:
+
+```
+Repel morale check
+Attacker morale check: morale + DRN - (weapon length difference)
+...units with claws and bites (weapon length zero) are easier to repel.
+```
+
+Weapon length is therefore the quantity behind advice like *"your light
+infantry took free hits from long weapons"*.

@@ -22,7 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dom6.engine import Engine, EngineError  # noqa: E402
-from dom6.gamedata import GameDataError, MonsterTable  # noqa: E402
+from dom6.gamedata import GameDataError, MonsterTable, WeaponTable  # noqa: E402
 
 DEFAULT_OUT = Path(__file__).resolve().parent.parent / "data" / "reference"
 
@@ -76,6 +76,19 @@ def main() -> int:
         print(f"  {len(table)} monsters, ids 0..{table.layout.highest_id} "
               f"(stride {table.layout.stride})")
         print(f"  wrote {(args.out / 'monsters.json')}")
+
+    print("\nweapon table (extracted from the executable)")
+    try:
+        wt = WeaponTable.from_exe(args.exe)
+    except GameDataError as exc:
+        print(f"  skipped: {exc}")
+    else:
+        wt.save(args.out / "weapons.json")
+        missiles = sum(1 for w in wt.weapons.values() if w.is_missile)
+        natural = sum(1 for w in wt.weapons.values() if w.length is None)
+        print(f"  {len(wt)} weapons (stride {wt.layout.stride}), "
+              f"{missiles} missile, {natural} natural")
+        print(f"  wrote {(args.out / 'weapons.json')}")
 
     return 0
 

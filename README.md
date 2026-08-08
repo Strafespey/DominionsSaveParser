@@ -15,8 +15,10 @@ in `docs/FILE_FORMAT.md`.
 - **Battle replay discovery** — finds every battle in a `.trn`, with the two
   sides' nations, the battlefield name, and the RNG seed.
 - **String decoding** — Dominions obfuscates all text with XOR `0x4F`.
+- **Order of battle** — every combatant in a replay, by name, per side.
 - **Reference data extraction** — 103 nations, 1473 spells, 3302 events and
-  146 summon rituals, dumped straight from the engine.
+  146 summon rituals dumped from the engine, plus **4115 monsters** and
+  **887 weapons** (with length and range) extracted from the executable.
 - **Sandboxed battle forecasting** — drives the engine's `--dumpfights`
   against a throwaway copy of your save to show what battles your *current
   orders* would produce, with both sides' full rosters. (This simulates the
@@ -24,13 +26,22 @@ in `docs/FILE_FORMAT.md`.
   `docs/ENGINE_TOOLING.md`.)
 
 ```
-$ py scripts/inspect_save.py Dominions_6
-=== Dominions_6 ===
-  ftherlnd [master] v6001 game='Dominions_6' battles=0 size=1632229
-  mid_bandarlog.trn [turn] v6001 game='Dominions_6' battles=2 size=287971
-      VCR #0 @0x00027351 v4 Independents vs Bandar Log in 'Trackless Woods' seed=115
-      VCR #1 @0x00036961 v4 Bandar Log vs Phaeacia in 'Trackless Woods' seed=9187
-  mid_bandarlog.2h [orders] v6001 game='Dominions_6' battles=0 size=36294
+$ py scripts/inspect_save.py mid_bandarlog.trn
+turn      : 9
+nation    : 68 (Bandar Log, Land of the Apes)
+battles   : 2
+
+  --- VCR #1 Bandar Log vs Phaeacia in 'Trackless Woods' seed=9187 ---
+      combatants          : 89 @0x00042424
+        Bandar Log (2 cmd, 37 units)
+              13 x Tiger Rider
+              13 x Armored Sacred Tiger
+              10 x Markata Archer
+               1 x Brahmin
+               1 x Bandar Noble
+        Phaeacia (1 cmd, 49 units)
+              49 x Longbowman
+               1 x Captain
 ```
 
 ## The key constraint, up front
@@ -108,8 +119,12 @@ data/reference/     generated game database (gitignored)
 
 ## Roadmap
 
-- [ ] Map province / unit / commander record layouts
-- [ ] Extract monster + weapon + armour stat tables from the executable
-      (needed for weapon *length*, which drives repel/free-hit analysis)
+- [x] Locate battle replays and decode the combatant record
+- [x] Extract the monster name table (4115 entries)
+- [x] Extract the weapon table with length and range (887 entries)
+- [ ] Extract the armour table (located at stride 104, not yet decoded)
+- [ ] Find each unit's weapons/armour inside the 888-byte monster record
+- [ ] Map battlefield placement (x/y, squad) in the 173-byte combatant record
+- [ ] Map province / commander record layouts
 - [ ] Build a rules knowledge base from the manual
 - [ ] Ship the battle-analyst agent skill

@@ -47,6 +47,37 @@ MONSTER_VALIDATION: dict[int, str] = {
     3550: "Armored Sacred Tiger",
 }
 
+#: Weapon anchors -- names that occur exactly once in the executable.
+#: Ids follow Dominions' documented weapon numbering (1 = Spear).
+WEAPON_ANCHORS: dict[str, int] = {
+    "Quarterstaff": 7,
+    "Long Bow": 24,
+    "Crossbow": 25,
+}
+
+WEAPON_VALIDATION: dict[int, str] = {
+    0: "Nothing",
+    1: "Spear",
+    2: "Pike",
+    9: "Dagger",
+    12: "Mace",
+    18: "Battleaxe",
+    26: "Arbalest",
+}
+
+#: Field offsets within the 152-byte weapon record.
+#: `length` is confirmed by the manual, which states a mace has length 1 and a
+#: pike is a long weapon; `range` by the classic bow/sling values.
+WEAPON_OFF_LENGTH = 54
+WEAPON_OFF_RANGE = 56
+
+#: Natural weapons (claws, bites) store 0xFF here. The manual describes them as
+#: "weapon length zero", so 0xFF is a sentinel, not a length of 255.
+_NATURAL_LENGTH = 0xFF
+
+#: Missile range sentinels: javelins and boulders derive range from strength.
+_RANGE_SENTINELS = {0xFF, 0xFD}
+
 _NAME_RE = re.compile(rb"^[\x20-\x7e]{1,63}\x00")
 _MIN_STRIDE, _MAX_STRIDE = 64, 8192
 _MAX_ID = 20000
@@ -193,6 +224,87 @@ class MonsterTable:
         )
 
 
+@dataclass
+class Weapon:
+    """One weapon from the executable's table."""
+
+    id: int
+    name: str
+    #: Melee reach. `None` for natural weapons (claws, bites), which the manual
+    #: treats as length zero and which are consequently easy to repel.
+    length: int | None
+    #: Missile range in map units, or `None` for melee / strength-derived range.
+    range: int | None
+
+    @property
+    def is_missile(self) -> bool:
+        return self.range is not None
+
+    @property
+    def effective_length(self) -> int:
+        """Length for repel purposes; natural weapons count as zero."""
+        return self.length or 0
+
+
+@dataclass
+class WeaponTable:
+    layout: TableLayout
+    weapons: dict[int, Weapon]
+
+    def __len__(self) -> int:
+        return len(self.weapons)
+
+    def get(self, weapon_id: int) -> Weapon | None:
+        return self.weapons.get(weapon_id)
+
+    def label(self, weapon_id: int) -> str:
+        w = self.weapons.get(weapon_id)
+        return w.name if w else f"weapon {weapon_id}"
+
+    @classmethod
+    def from_exe(cls, exe: str | Path | None = None) -> "WeaponTable":
+        path = Path(exe) if exe else _default_exe()
+        data = path.read_bytes()
+        layout = solve_layout(data, WEAPON_ANCHORS, WEAPON_VALIDATION)
+        weapons: dict[int, Weapon] = {}
+        for wid in range(layout.highest_id + 1):
+            off = layout.offset_of(wid)
+            name = _read_name(data, off)
+            if not name:
+                continue
+            raw_len = data[off + WEAPON_OFF_LENGTH]
+            raw_rng = data[off + WEAPON_OFF_RANGE]
+            weapons[wid] = Weapon(
+                id=wid,
+                name=name,
+                length=None if raw_len == _NATURAL_LENGTH else raw_len,
+                range=None if raw_rng in _RANGE_SENTINELS or raw_rng == 0 else raw_rng,
+            )
+        return cls(layout=layout, weapons=weapons)
+
+    def save(self, path: str | Path) -> None:
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(
+            json.dumps(
+                {
+                    "layout": self.layout.__dict__,
+                    "weapons": {
+                        str(w.id): {
+                            "name": w.name,
+                            "length": w.length,
+                            "range": w.range,
+                        }
+                        for w in self.weapons.values()
+                    },
+                },
+                indent=2,
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+
 def _default_exe() -> Path:
     game = find_game_dir()
     if not game:
@@ -203,12 +315,21 @@ def _default_exe() -> Path:
     raise GameDataError(f"no Dominions 6 executable in {game}")
 
 
-_CACHE: MonsterTable | None = None
+_MONSTER_CACHE: MonsterTable | None = None
+_WEAPON_CACHE: WeaponTable | None = None
 
 
 def monsters(exe: str | Path | None = None) -> MonsterTable:
     """Process-wide cached monster table."""
-    global _CACHE
-    if _CACHE is None:
-        _CACHE = MonsterTable.from_exe(exe)
-    return _CACHE
+    global _MONSTER_CACHE
+    if _MONSTER_CACHE is None:
+        _MONSTER_CACHE = MonsterTable.from_exe(exe)
+    return _MONSTER_CACHE
+
+
+def weapons(exe: str | Path | None = None) -> WeaponTable:
+    """Process-wide cached weapon table."""
+    global _WEAPON_CACHE
+    if _WEAPON_CACHE is None:
+        _WEAPON_CACHE = WeaponTable.from_exe(exe)
+    return _WEAPON_CACHE
