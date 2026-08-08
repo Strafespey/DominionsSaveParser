@@ -117,6 +117,25 @@ data/reference/     generated game database (gitignored)
 - [`docs/ENGINE_TOOLING.md`](docs/ENGINE_TOOLING.md) — engine switches,
   environment variables, and the caveats on `--dumpfights`.
 
+## Rules knowledge base
+
+`kb/` holds the manual as a tiered corpus, so an agent can consult the rules
+without loading a 449-page book (~344k tokens):
+
+| Tier | What | Size |
+|---|---|---|
+| 0 | `kb/rules-cheatsheet.md` — the ~20 mechanics that decide battles | ~1.6k tokens |
+| 1 | `kb/index.md` routing table + full 407-entry section index | ~4.6k tokens |
+| 1 | `kb/sections/*.md` — one file per chapter (Combat ~16k) | load one |
+| 1 | `kb/nations/*.md` — one file per nation | ~1.3k each |
+| 2 | `kb/manual.txt` — page-anchored full text, **grep only** | never load |
+
+Sectioning is driven by the PDF's own outline rather than heading regexes, and
+every page is marked `[p.N]` so any claim can be cited and checked.
+
+Rebuild with `py scripts/build_manual_kb.py`. The cheat sheet is hand-written
+and is not regenerated.
+
 ## Roadmap
 
 - [x] Locate battle replays and decode the combatant record
