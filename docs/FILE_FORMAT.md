@@ -197,6 +197,61 @@ the owner field, detection is reliable and verified.
 
 ---
 
+## 4b. Battle scripting — vocabulary known, storage NOT found ❌
+
+Dominions lets you script a commander with an ordered list of actions ("cast
+this spell, then this one, then hold, then advance") plus a target preference.
+Being able to read that back is what would allow advice like *"script the
+archers to hold twice so they out-range the javelin throwers"*.
+
+**The vocabulary is recovered** from the executable's string table.
+
+Commander orders (letter shortcuts in parentheses):
+
+| Order | Description |
+|---|---|
+| (a) Attack | Move towards enemies to engage in melee |
+| (v) Attack one turn | Move towards a random enemy for one combat round |
+| (y) Fly Attack one turn | As above, flying |
+| (f) Fire | Fire missile weapons against enemies |
+| (e) Fire and keep distance | Fire until the target closes, then withdraw |
+| (c) Cast spells | The computer chooses spells |
+| (d) Advance and cast spells | Advance to the front and cast |
+| (s) Stay behind troops | Cast, fire, or hang back |
+| (g) Guard commander | Deploy next to the commander being guarded |
+| (h) Hold and attack | **Hold position for two turns, then advance** |
+| (r) Retreat | Leave the battlefield |
+
+Squad orders: Attack, Hold and attack, Fire, Hold and Fire, Fire and keep
+distance, Retreat, Guard commander.
+
+Targets: closest enemy, rearmost enemies, enemy archers, enemy cavalry,
+enemy fliers, large enemy monsters.
+
+**Where scripts are stored is still unknown.** Two negative results worth
+recording so they are not re-investigated:
+
+- They are **not** in the 173-byte combat record. Commander records there are
+  almost entirely zero outside unit state (`+23` type, `+55` owner, `+164`
+  unit number). Apparent "spell id" hits at `+60`/`+168` are coincidences —
+  `255` and `83` falling out of `0xFF` sentinel bytes and a terminator.
+- Diffing a commander between `.trn` and `.2h` does not work directly: the
+  two files do not share unit numbering (196 distinct unit numbers in the
+  `.trn` versus 17 in the `.2h`, overlapping only on junk values such as
+  `0`, `1`, `65535`).
+
+The `.2h` does contain 173-byte unit records, so it is the most likely home,
+but its record layout has not been mapped.
+
+### How to unblock this
+
+The same technique that cracked the combat record — **labelled ground truth** —
+applies. Set a distinctive, known script on one commander (e.g. slot 1 a
+memorable spell, slots 2–3 "hold", target "rearmost enemies"), end the turn,
+and keep the `.2h`. Then change *only* that script and end turn again. Diffing
+two `.2h` files that differ in exactly one known way localises the field
+immediately.
+
 ## 5. Province records 🟡
 
 Provinces occupy the bulk of a `.trn`. Each record contains the province name

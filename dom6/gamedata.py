@@ -21,7 +21,9 @@ from __future__ import annotations
 
 import json
 import re
+import struct
 from dataclasses import dataclass
+from dataclasses import field as dc_field
 from pathlib import Path
 
 from .paths import find_game_dir
@@ -77,6 +79,17 @@ _NATURAL_LENGTH = 0xFF
 
 #: Missile range sentinels: javelins and boulders derive range from strength.
 _RANGE_SENTINELS = {0xFF, 0xFD}
+
+#: Weapon-id slots inside the 888-byte monster record (u16 each, 0 = empty).
+#: Found by requiring Longbowman -> Long Bow and Crossbowman -> Crossbow, then
+#: confirmed across the table: Archer [Dagger, Short Bow], Militia [Spear],
+#: Heavy Infantry [Broad Sword], Deer Tribe Warrior [Spear, Javelin].
+MONSTER_OFF_WEAPONS = 832
+MONSTER_WEAPON_SLOTS = 7
+
+#: Armour-id slots. The armour *table* is not decoded yet, so these are raw ids.
+MONSTER_OFF_ARMOUR = 852
+MONSTER_ARMOUR_SLOTS = 4
 
 _NAME_RE = re.compile(rb"^[\x20-\x7e]{1,63}\x00")
 _MIN_STRIDE, _MAX_STRIDE = 64, 8192
@@ -176,52 +189,100 @@ def _find_highest_id(data: bytes, layout: TableLayout, tolerance: int = 64) -> i
 
 
 @dataclass
+class Monster:
+    """One unit type from the executable's table."""
+
+    id: int
+    name: str
+    weapon_ids: list[int] = dc_field(default_factory=list)
+    #: Raw armour ids; the armour table is not decoded yet.
+    armour_ids: list[int] = dc_field(default_factory=list)
+
+
+@dataclass
 class MonsterTable:
-    """Monster id -> name, extracted from the executable."""
+    """Monster id -> unit type, extracted from the executable."""
 
     layout: TableLayout
-    names: dict[int, str]
+    monsters: dict[int, Monster]
 
     def __len__(self) -> int:
-        return len(self.names)
+        return len(self.monsters)
 
-    def get(self, type_id: int, default: str | None = None) -> str | None:
-        return self.names.get(type_id, default)
+    @property
+    def names(self) -> dict[int, str]:
+        return {i: m.name for i, m in self.monsters.items()}
+
+    def get(self, type_id: int) -> Monster | None:
+        return self.monsters.get(type_id)
 
     def label(self, type_id: int) -> str:
-        return self.names.get(type_id) or f"type {type_id}"
+        m = self.monsters.get(type_id)
+        return m.name if m else f"type {type_id}"
+
+    def weapons_of(
+        self, type_id: int, table: "WeaponTable | None" = None
+    ) -> list["Weapon"]:
+        """Resolve a unit's weapons, skipping ids the weapon table lacks."""
+        m = self.monsters.get(type_id)
+        if not m:
+            return []
+        wt = table or weapons()
+        return [w for wid in m.weapon_ids if (w := wt.get(wid))]
 
     @classmethod
     def from_exe(cls, exe: str | Path | None = None) -> "MonsterTable":
         path = Path(exe) if exe else _default_exe()
         data = path.read_bytes()
         layout = solve_layout(data, MONSTER_ANCHORS, MONSTER_VALIDATION)
-        names = {}
+        out: dict[int, Monster] = {}
         for entry_id in range(layout.highest_id + 1):
-            name = _read_name(data, layout.offset_of(entry_id))
-            if name:
-                names[entry_id] = name
-        return cls(layout=layout, names=names)
-
-    @classmethod
-    def load(cls, path: str | Path) -> "MonsterTable":
-        raw = json.loads(Path(path).read_text(encoding="utf-8"))
-        return cls(
-            layout=TableLayout(**raw["layout"]),
-            names={int(k): v for k, v in raw["names"].items()},
-        )
+            base = layout.offset_of(entry_id)
+            name = _read_name(data, base)
+            if not name:
+                continue
+            out[entry_id] = Monster(
+                id=entry_id,
+                name=name,
+                weapon_ids=_slots(
+                    data, base + MONSTER_OFF_WEAPONS, MONSTER_WEAPON_SLOTS
+                ),
+                armour_ids=_slots(
+                    data, base + MONSTER_OFF_ARMOUR, MONSTER_ARMOUR_SLOTS
+                ),
+            )
+        return cls(layout=layout, monsters=out)
 
     def save(self, path: str | Path) -> None:
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(
             json.dumps(
-                {"layout": self.layout.__dict__, "names": self.names},
+                {
+                    "layout": self.layout.__dict__,
+                    "monsters": {
+                        str(m.id): {
+                            "name": m.name,
+                            "weapons": m.weapon_ids,
+                            "armour": m.armour_ids,
+                        }
+                        for m in self.monsters.values()
+                    },
+                },
                 indent=2,
                 ensure_ascii=False,
             ),
             encoding="utf-8",
         )
+
+
+def _slots(data: bytes, offset: int, count: int) -> list[int]:
+    out = []
+    for i in range(count):
+        (v,) = struct.unpack_from("<H", data, offset + i * 2)
+        if v:
+            out.append(v)
+    return out
 
 
 @dataclass

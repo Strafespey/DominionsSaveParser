@@ -37,6 +37,29 @@ def monster_label(type_id: int) -> str:
     return f"type {type_id}"
 
 
+def loadout(type_id: int) -> str:
+    """Weapons a unit type carries, with reach and range."""
+    if not _MONSTERS:
+        monster_label(type_id)
+    if not _MONSTERS:
+        return ""
+    try:
+        from dom6.gamedata import weapons
+
+        ws = _MONSTERS.weapons_of(type_id, weapons())
+    except Exception:  # noqa: BLE001
+        return ""
+    if not ws:
+        return ""
+    parts = []
+    for w in ws:
+        if w.is_missile:
+            parts.append(f"{w.name} rng {w.range}")
+        else:
+            parts.append(f"{w.name} len {w.effective_length}")
+    return "  [" + ", ".join(parts) + "]"
+
+
 def nation_names() -> dict[int, str]:
     """Nation id -> name, queried once from the engine. Empty if unavailable."""
     global _NATIONS
@@ -111,7 +134,7 @@ def inspect_file(path: Path, args) -> int:
                     print(f"        {label.split(',')[0]} "
                           f"({side['commanders']} cmd, {side['units']} units)")
                     for t, n in side["by_type"].most_common():
-                        print(f"            {n:4d} x {monster_label(t)}")
+                        print(f"            {n:4d} x {monster_label(t)}{loadout(t)}")
             else:
                 print("      combatants          : none found "
                       "(assassination replays are not decoded yet)")

@@ -176,8 +176,29 @@ exposed as `length is None` with `effective_length == 0`.
 > ("Hypnotize", "Spectral Fire", "Wail") also carry values there that are
 > unlikely to be reach. Trust it for physical weapons.
 
+### Unit → weapon link ✅
+
+The 888-byte monster record carries the ids of the weapons the unit wields:
+
+| Field | Offset | Slots |
+|---|---|---|
+| weapon ids | `+832` | 7 × u16, `0` = empty |
+| armour ids | `+852` | 4 × u16, `0` = empty |
+
+Found by requiring Longbowman → Long Bow and Crossbowman → Crossbow, then
+confirmed across the whole table by inspection:
+
+| Unit | Weapons |
+|---|---|
+| Longbowman | Short Sword (len 1), Long Bow (range 45) |
+| Archer | Dagger (len 0), Short Bow (range 35) |
+| Militia / Light Infantry | Spear (len 3) |
+| Heavy Infantry | Broad Sword (len 1) |
+| Deer Tribe Warrior | Spear (len 3), Javelin |
+| Armored Sacred Tiger | Bite, Claw (both natural → length 0) |
+
 **Armour** lives in a third table at stride 104 (Buckler, Kite Shield, Tower
-Shield were located) but is not extracted yet.
+Shield were located) but is not extracted yet, so armour ids stay raw.
 
 ### Why this matters
 
