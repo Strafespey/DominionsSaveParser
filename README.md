@@ -117,6 +117,19 @@ data/reference/     generated game database (gitignored)
 - [`docs/ENGINE_TOOLING.md`](docs/ENGINE_TOOLING.md) — engine switches,
   environment variables, and the caveats on `--dumpfights`.
 
+## The agent skill
+
+`.claude/skills/dominions6-analyst/` turns all of the above into an advisor.
+Open Claude Code in this repo and ask:
+
+> Why did I lose the battle in Trackless Woods?
+
+It reads your turn file, builds the battle report, consults the rules, and
+answers with manual page citations. It is told explicitly what the data can and
+cannot support — enemy losses are "no longer visible to you" rather than
+confirmed kills, there is no blow-by-blow log to invent, and open-ended DRN
+means a stat advantage is never a guarantee.
+
 ## Rules knowledge base
 
 `kb/` holds the manual as a tiered corpus, so an agent can consult the rules
