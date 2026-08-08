@@ -22,7 +22,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dom6.engine import Engine, EngineError  # noqa: E402
-from dom6.gamedata import GameDataError, MonsterTable, WeaponTable  # noqa: E402
+from dom6.gamedata import (  # noqa: E402
+    GameDataError,
+    MonsterTable,
+    WeaponTable,
+    validate_monster_stats,
+)
 
 DEFAULT_OUT = Path(__file__).resolve().parent.parent / "data" / "reference"
 
@@ -75,6 +80,13 @@ def main() -> int:
         table.save(args.out / "monsters.json")
         print(f"  {len(table)} monsters, ids 0..{table.layout.highest_id} "
               f"(stride {table.layout.stride})")
+        problems = validate_monster_stats(table)
+        if problems:
+            print("  !! stat validation FAILED:")
+            for p in problems:
+                print(f"     - {p}")
+        else:
+            print("  stat validation passed")
         print(f"  wrote {(args.out / 'monsters.json')}")
 
     print("\nweapon table (extracted from the executable)")

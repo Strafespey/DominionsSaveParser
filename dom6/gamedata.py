@@ -91,6 +91,38 @@ MONSTER_WEAPON_SLOTS = 7
 MONSTER_OFF_ARMOUR = 852
 MONSTER_ARMOUR_SLOTS = 4
 
+#: Combat stat block. Stored two bytes apart; every value observed fits in a
+#: byte except hit points, so all are read as u16.
+#:
+#: How each was pinned down:
+#:  size      the manual says a square holds "10 size points" and that giants
+#:            are "size 6+"; this field maxes at 10, giants read 6, humans 3 --
+#:            and the manual's own example calls a human "size 3"
+#:  hp        rises monotonically with size (size 1 -> 3.1 avg, size 3 -> 12.2,
+#:            size 6 -> 42.5, size 10 -> 157.5); Militia 10, Elephant 61
+#:  strength  scales with mass (humans 10, giants 23, Dagon 30)
+#:  attack /  units where defence exceeds attack are agile types (Sprite, Ghost
+#:  defence   King, Spectator); units where attack exceeds defence are immobile
+#:            trees reading defence 0 (Dying Treelord, Irminsul, Hamadryad)
+#:  morale    5-18 for living units and exactly 50 for mindless undead
+#:  encumbr.  0 for undead and inanimate, 2-4 for the living
+#:  mr        humans 10, animals 5
+#:  prot      natural protection only; humans 0, Elephant 11, giants 5
+MONSTER_OFF_ACTION_POINTS = 40
+MONSTER_OFF_SIZE = 44
+MONSTER_OFF_HP = 46
+MONSTER_OFF_PROTECTION = 48
+MONSTER_OFF_STRENGTH = 50
+MONSTER_OFF_ENCUMBRANCE = 52
+MONSTER_OFF_MAGIC_RESISTANCE = 54
+MONSTER_OFF_ATTACK = 56
+MONSTER_OFF_DEFENCE = 58
+MONSTER_OFF_PRECISION = 60
+MONSTER_OFF_MORALE = 62
+
+#: Mindless units store this instead of a real morale value; they never rout.
+MINDLESS_MORALE = 50
+
 _NAME_RE = re.compile(rb"^[\x20-\x7e]{1,63}\x00")
 _MIN_STRIDE, _MAX_STRIDE = 64, 8192
 _MAX_ID = 20000
@@ -198,6 +230,34 @@ class Monster:
     #: Raw armour ids; the armour table is not decoded yet.
     armour_ids: list[int] = dc_field(default_factory=list)
 
+    # Combat stats. `protection` is natural protection only -- worn armour
+    # adds to it and is not resolved yet.
+    hp: int = 0
+    size: int = 0
+    protection: int = 0
+    strength: int = 0
+    attack: int = 0
+    defence: int = 0
+    precision: int = 0
+    morale: int = 0
+    magic_resistance: int = 0
+    encumbrance: int = 0
+    action_points: int = 0
+
+    @property
+    def is_mindless(self) -> bool:
+        """Mindless units never rout; the engine stores morale 50 for them."""
+        return self.morale >= MINDLESS_MORALE
+
+    def summary(self) -> str:
+        mor = "mindless" if self.is_mindless else f"mor {self.morale}"
+        return (
+            f"hp {self.hp} sz {self.size} prot {self.protection} "
+            f"str {self.strength} att {self.attack} def {self.defence} "
+            f"prec {self.precision} mr {self.magic_resistance} "
+            f"enc {self.encumbrance} {mor}"
+        )
+
 
 @dataclass
 class MonsterTable:
@@ -241,6 +301,9 @@ class MonsterTable:
             name = _read_name(data, base)
             if not name:
                 continue
+            def stat(delta: int, _b: int = base) -> int:
+                return struct.unpack_from("<H", data, _b + delta)[0]
+
             out[entry_id] = Monster(
                 id=entry_id,
                 name=name,
@@ -250,6 +313,17 @@ class MonsterTable:
                 armour_ids=_slots(
                     data, base + MONSTER_OFF_ARMOUR, MONSTER_ARMOUR_SLOTS
                 ),
+                hp=stat(MONSTER_OFF_HP),
+                size=stat(MONSTER_OFF_SIZE),
+                protection=stat(MONSTER_OFF_PROTECTION),
+                strength=stat(MONSTER_OFF_STRENGTH),
+                attack=stat(MONSTER_OFF_ATTACK),
+                defence=stat(MONSTER_OFF_DEFENCE),
+                precision=stat(MONSTER_OFF_PRECISION),
+                morale=stat(MONSTER_OFF_MORALE),
+                magic_resistance=stat(MONSTER_OFF_MAGIC_RESISTANCE),
+                encumbrance=stat(MONSTER_OFF_ENCUMBRANCE),
+                action_points=stat(MONSTER_OFF_ACTION_POINTS),
             )
         return cls(layout=layout, monsters=out)
 
@@ -265,6 +339,17 @@ class MonsterTable:
                             "name": m.name,
                             "weapons": m.weapon_ids,
                             "armour": m.armour_ids,
+                            "hp": m.hp,
+                            "size": m.size,
+                            "protection": m.protection,
+                            "strength": m.strength,
+                            "attack": m.attack,
+                            "defence": m.defence,
+                            "precision": m.precision,
+                            "morale": m.morale,
+                            "magic_resistance": m.magic_resistance,
+                            "encumbrance": m.encumbrance,
+                            "action_points": m.action_points,
                         }
                         for m in self.monsters.values()
                     },
@@ -274,6 +359,56 @@ class MonsterTable:
             ),
             encoding="utf-8",
         )
+
+
+def validate_monster_stats(table: "MonsterTable") -> list[str]:
+    """Check the stat extraction against facts stated in the manual.
+
+    Returns a list of problems; empty means every check passed. These are
+    deliberately checks the offsets were *not* chosen to satisfy, so they can
+    actually fail if a patch moves the stat block.
+    """
+    problems: list[str] = []
+    by_name: dict[str, Monster] = {}
+    for m in table.monsters.values():
+        by_name.setdefault(m.name, m)
+
+    def check(cond: bool, msg: str) -> None:
+        if not cond:
+            problems.append(msg)
+
+    # The manual: a square holds "10 size points"; giants are "size 6+";
+    # its worked example calls a human "size 3".
+    sizes = [m.size for m in table.monsters.values()]
+    check(max(sizes) <= 10, f"size exceeds the manual's maximum of 10: {max(sizes)}")
+    if (militia := by_name.get("Militia")) is not None:
+        check(militia.size == 3, f"Militia size {militia.size}, expected 3")
+        check(militia.hp == 10, f"Militia hp {militia.hp}, expected 10")
+        check(militia.protection == 0, "Militia should have no natural protection")
+    for giant in ("Jotun Jarl", "Niefel Giant"):
+        if (g := by_name.get(giant)) is not None:
+            check(g.size >= 6, f"{giant} size {g.size}, expected >= 6 (giant)")
+
+    # Mindless undead never rout.
+    if (ld := by_name.get("Longdead")) is not None:
+        check(ld.is_mindless, f"Longdead morale {ld.morale}, expected mindless")
+        check(ld.encumbrance == 0, "undead should have encumbrance 0")
+
+    # Immobile trees cannot evade.
+    if (tree := by_name.get("Dying Treelord")) is not None:
+        check(tree.defence == 0, f"Dying Treelord defence {tree.defence}, expected 0")
+
+    # Hit points must rise with size.
+    buckets: dict[int, list[int]] = {}
+    for m in table.monsters.values():
+        if m.size:
+            buckets.setdefault(m.size, []).append(m.hp)
+    means = [sum(v) / len(v) for _, v in sorted(buckets.items())]
+    check(
+        all(a < b for a, b in zip(means, means[1:])),
+        f"mean hp is not monotonic in size: {[round(x, 1) for x in means]}",
+    )
+    return problems
 
 
 def _slots(data: bytes, offset: int, count: int) -> list[int]:

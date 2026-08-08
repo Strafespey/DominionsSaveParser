@@ -40,7 +40,7 @@ def monster_label(type_id: int) -> str:
 
 def loadout(type_id: int) -> str:
     """Weapons a unit type carries, with reach and range."""
-    if not _MONSTERS:
+    if _MONSTERS is None:
         monster_label(type_id)
     if not _MONSTERS:
         return ""
@@ -58,7 +58,23 @@ def loadout(type_id: int) -> str:
             parts.append(f"{w.name} rng {w.range}")
         else:
             parts.append(f"{w.name} len {w.effective_length}")
-    return "  [" + ", ".join(parts) + "]"
+    return " | " + ", ".join(parts)
+
+
+def stats(type_id: int) -> str:
+    """Compact combat stats for a unit type."""
+    if _MONSTERS is None:
+        monster_label(type_id)
+    if not _MONSTERS:
+        return ""
+    m = _MONSTERS.get(type_id)
+    if not m or not m.hp:
+        return ""
+    mor = "MINDLESS" if m.is_mindless else f"mor{m.morale}"
+    return (
+        f"hp{m.hp} sz{m.size} prot{m.protection} "
+        f"att{m.attack} def{m.defence} {mor} enc{m.encumbrance}"
+    )
 
 
 def nation_names() -> dict[int, str]:
@@ -144,7 +160,8 @@ def inspect_file(path: Path, args) -> int:
                         print(f"          {tag} ({len(members)}){at}:")
                         counts = Counter(m.type_id for m in members)
                         for t, n in counts.most_common():
-                            print(f"            {n:4d} x {monster_label(t)}{loadout(t)}")
+                            print(f"            {n:4d} x {monster_label(t)}")
+                            print(f"                 {stats(t)}{loadout(t)}")
             else:
                 print("      combatants          : none found "
                       "(assassination replays are not decoded yet)")

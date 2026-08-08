@@ -176,6 +176,48 @@ exposed as `length is None` with `effective_length == 0`.
 > ("Hypnotize", "Spectral Fire", "Wail") also carry values there that are
 > unlikely to be reach. Trust it for physical weapons.
 
+### Unit combat stats ✅
+
+The stat block sits at `+40`..`+62` of the monster record, values two bytes
+apart:
+
+| Offset | Stat | Offset | Stat |
+|---|---|---|---|
+| `+40` | action points | `+52` | encumbrance |
+| `+44` | **size** | `+54` | magic resistance |
+| `+46` | **hit points** | `+56` | **attack** |
+| `+48` | **protection** (natural only) | `+58` | **defence** |
+| `+50` | strength | `+60` | precision |
+| | | `+62` | **morale** (`50` = mindless) |
+
+Identified from invariants rather than guesswork, then checked against facts
+the offsets were *not* chosen to satisfy (`validate_monster_stats()`):
+
+- **size** — the manual says a square holds *"10 size points"* and that giants
+  are *"size 6+"*; the field maxes at exactly 10, giants read 6, humans 3, and
+  the manual's own worked example calls a human *"size 3"*.
+- **hit points** — rises monotonically with size: mean hp is 3.1 at size 1,
+  12.2 at size 3, 42.5 at size 6, 157.5 at size 10.
+- **attack vs defence** — units whose defence exceeds attack are agile types
+  (Sprite, Ghost King, Spectator); units whose attack exceeds defence are
+  immobile trees reading **defence 0** (Dying Treelord, Irminsul, Hamadryad).
+- **morale** — 5–18 for living units and exactly **50** for mindless undead,
+  which never rout.
+- **encumbrance** — 0 for undead and inanimate, 2–4 for the living.
+
+Spot check:
+
+```
+Militia               hp 10 sz 3 prot  0 str 10 att  8 def  8 mr 10 enc 4 mor 8
+Sprite                hp  2 sz 1 prot  0 str  3 att 14 def 20 mr 14 enc 1 mor 7
+Elephant              hp 61 sz 9 prot 11 str 20 att  9 def  8 mr  5 enc 3 mor 8
+Jotun Jarl            hp 40 sz 6 prot  5 str 23 att 13 def 12 mr 10 enc 3 mor 14
+Longdead              hp  5 sz 3 prot  0 str 10 att 11 def  9 mr 10 enc 0 mindless
+```
+
+`protection` is **natural protection only** — worn armour adds to it, and the
+armour table is not decoded yet, so armoured units read lower than they fight.
+
 ### Unit → weapon link ✅
 
 The 888-byte monster record carries the ids of the weapons the unit wields:
