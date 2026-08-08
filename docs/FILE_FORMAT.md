@@ -231,6 +231,48 @@ unmapped; the engine strings confirm they exist
 (*"Units with the Guard Commander order always deploy next to the commander
 they are guarding"*).
 
+### Casualties are inferred, not stored ⚠️
+
+There is **no casualty list and no per-unit death flag**. Tested directly: two
+battles occur in the same province on the same turn, so the units missing from
+the second are exactly those lost in the first — and comparing those records
+against the survivors' finds **no offset that separates them**. The replay
+holds the state at battle *start*; the outcome is produced by re-simulating.
+
+`dom6.analysis.battle_outcomes()` therefore *infers* losses: a unit is counted
+lost in battle *i* if it fought there and appears neither in a later battle of
+the same turn nor among the units still on the map afterwards.
+
+Checking later battles is what makes the attribution correct. Without it, a
+unit that survived the first fight and died in the second is charged to both —
+which inflated one battle from 3 losses to 16.
+
+**Two caveats, kept explicit in the API rather than averaged away:**
+
+1. **Enemy losses are not confirmed kills.** A turn file only shows what its
+   owner can see, so enemy survivors are invisible whether they died or merely
+   walked away. `SideOutcome.observable` is `False` for every nation except the
+   file's owner, and `.caveat` spells this out.
+2. **Own losses depend on complete map-army detection.** A missed array
+   overstates losses. This is why the unit-number uniqueness filter matters.
+
+Worked example from a real turn-9 file:
+
+```
+Trackless Woods — Independents vs Bandar Log
+  Independents: 43 engaged,  1 survived, 42 lost (98%)   [not confirmed kills]
+  Bandar Log:   41 engaged, 38 survived,  3 lost (7%)
+      -1 Bandar Noble, -1 Tiger Rider, -1 Armored Sacred Tiger
+
+Trackless Woods — Bandar Log vs Phaeacia
+  Bandar Log:   39 engaged, 22 survived, 17 lost (44%)
+      -6 Armored Sacred Tiger, -5 Tiger Rider, -4 Markata Archer, ...
+  Phaeacia:     50 engaged,  2 survived, 48 lost (96%)   [not confirmed kills]
+```
+
+Riders and mounts are separate units, so they are lost separately — 5 Tiger
+Riders and 6 of their tigers, meaning one tiger outlived its rider.
+
 ### Locating arrays outside replays 🟡
 
 The same 173-byte record is used for **armies standing on the map**, not just
