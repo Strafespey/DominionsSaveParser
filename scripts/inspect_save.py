@@ -87,6 +87,19 @@ def inspect_file(path: Path, args) -> int:
             print(f"      span to next marker : {b.size} bytes")
             print(f"      names in header     : {b.names}")
             print(f"      int32 fields        : {b.raw_fields}")
+            if b.units:
+                print(f"      combatants          : {len(b.units)} "
+                      f"@0x{b.units_offset or 0:08x}")
+                for owner, side in sorted(b.order_of_battle().items()):
+                    label = nations.get(owner, "Independents" if owner == 0 else f"nation {owner}")
+                    types = ", ".join(
+                        f"type {t}x{n}" for t, n in side["by_type"].most_common()
+                    )
+                    print(f"        {label.split(',')[0]:<28} "
+                          f"{side['commanders']} cmd, {side['units']} units | {types}")
+            else:
+                print("      combatants          : none found "
+                      "(assassination replays are not decoded yet)")
             if args.battles:
                 from dom6.reader import Cursor
 

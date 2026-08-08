@@ -134,6 +134,58 @@ Corroborated by the province event text in the same file:
 `"Trackless Woods was conquered by Bandar Log"`. A turn-1 `.trn` from a
 different game contains zero markers, consistent with no battles yet.
 
+### The combatant record — 173 bytes ✅
+
+Inside a replay body sits an array of fixed-size 173-byte records, one per
+combatant. The stride was found by measuring the dominant repeat distance of
+u16 values across the body (173 won with 1860 votes; the next candidate had
+210). Field meanings were then established with **labelled ground truth**:
+host a turn with `--dumpfights` to get a known roster, then parse the `.trn`
+that same host wrote.
+
+| Offset | Type | Meaning |
+|---|---|---|
+| `+20` | u16 | `0xFFFF` on commanders ✅; other values unexplained ❓ |
+| `+23` | u16 | ✅ **monster type id** |
+| `+27` | u8 | file-global stamp — see warning below |
+| `+55` | u8 | ✅ **owner nation id** (`0` = independents) |
+| `+164` | u16 | unit number 🟡 |
+
+Verification, battle in "The Mire of Mystery": 145 records split
+**79 Bandar Log / 66 Independents** by `+55`, and grouped by `+23` as:
+
+| Owner | Types found | `--dumpfights` roster |
+|---|---|---|
+| 68 | `1122`×30, `1125`×24, `1141`×12, `3550`×12, `1135`×1 | 30 Atavi Infantry, 24 Vanara Infantry, 12 Tiger Rider, 1 commander |
+| 0 | `30`×26, `28`×22, `17`×15, `34`×3 | 26 Militia, 22 Light Infantry, 15 Archer, 3 Commander |
+
+The 12 extra records are the **Tiger Riders' mounts** — mounts are separate
+combatants, consistent with the engine's
+`bc: Mount (%s) and master (%s) have different owners`. Type `3550` appears
+exactly as often as type `1141` in every battle observed, confirming the
+pairing. `+20 == 0xFFFF` selected exactly the 4 commanders the roster reported.
+
+> ⚠️ **`+27` is not a magic number.** It is identical across every record
+> within one file (`0x31` in a turn-10 `.trn`) which makes it a tempting
+> anchor, but a turn-9 `.trn` of the *same game* carries `50` there, and the
+> same value appears in the replay header. Anchoring on a hard-coded value
+> silently finds nothing in other files. Records are located by field
+> plausibility, requiring a run to share whatever stamp its first record has.
+
+### Locating arrays outside replays 🟡
+
+The same 173-byte record is used for **armies standing on the map**, not just
+combatants in a replay. `dom6.vcr.find_unit_arrays()` scans a whole file for
+them.
+
+This is **best-effort**: the record has no magic number, so a run offset by a
+few bytes from a genuine array still passes a per-field plausibility test.
+Overlapping candidates are resolved in favour of the longest, and arrays with
+more than two distinct owners are rejected — but false positives remain
+(clusters of type ids like `2048`/`255`/`3072` in `ftherlnd` are aliases, not
+armies). Inside a replay, where the two nation ids are known and can constrain
+the owner field, detection is reliable and verified.
+
 ### Consequences for analysis
 
 - Army composition, placement, equipment, orders and casualties are all

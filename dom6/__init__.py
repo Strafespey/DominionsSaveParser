@@ -16,7 +16,15 @@ from .paths import (
 from .reader import Cursor
 from .save import SaveFile, SaveFormatError, SaveHeader, load, parse_header
 from .vcr import MARKER as VCR_MARKER
-from .vcr import VcrSection, find_battles, find_battles_in_file
+from .vcr import (
+    UNIT_RECORD_SIZE,
+    VcrSection,
+    VcrUnit,
+    find_battles,
+    find_battles_in_file,
+    find_unit_arrays,
+    find_unit_records,
+)
 
 __all__ = [
     "XOR_KEY",
@@ -29,9 +37,13 @@ __all__ = [
     "load",
     "parse_header",
     "VcrSection",
+    "VcrUnit",
     "VCR_MARKER",
+    "UNIT_RECORD_SIZE",
     "find_battles",
     "find_battles_in_file",
+    "find_unit_arrays",
+    "find_unit_records",
     "SaveGame",
     "find_game_dir",
     "find_executable",
