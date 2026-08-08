@@ -149,14 +149,23 @@ every page is marked `[p.N]` so any claim can be cited and checked.
 Rebuild with `py scripts/build_manual_kb.py`. The cheat sheet is hand-written
 and is not regenerated.
 
+## Quick start
+
+```sh
+py scripts/extract_reference.py        # game database from the engine + exe
+py scripts/build_manual_kb.py          # rules corpus from the manual
+py scripts/install_dom6_command.py     # the `dom6` launcher
+
+dom6 "why did I lose the battle in Trackless Woods?"
+```
+
 ## Roadmap
 
-- [x] Locate battle replays and decode the combatant record
-- [x] Extract the monster name table (4115 entries)
-- [x] Extract the weapon table with length and range (887 entries)
-- [ ] Extract the armour table (located at stride 104, not yet decoded)
-- [ ] Find each unit's weapons/armour inside the 888-byte monster record
-- [ ] Map battlefield placement (x/y, squad) in the 173-byte combatant record
-- [ ] Map province / commander record layouts
-- [ ] Build a rules knowledge base from the manual
-- [ ] Ship the battle-analyst agent skill
+Done: battle replays, the combatant record, squads and placement, casualty
+inference, the monster / weapon / armour tables, unit combat stats, the rules
+knowledge base, and the analyst skill.
+
+**See [`docs/ROADMAP.md`](docs/ROADMAP.md)** for what is still unmapped and —
+importantly — the short list of things *you* can capture in-game that would
+unblock the rest. Battle scripts are the biggest remaining gap and need two
+`.2h` files differing in one known way.
