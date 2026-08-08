@@ -133,13 +133,26 @@ The engine also references `%s/%d_%d.vcr` and `%s/5_0.vcr` file paths, plus a
 `%s/tmp_vpb` temp file used by `ViewProvinceBattles`. No `.vcr` files exist on
 disk during normal play — replays live inside the `.trn`.
 
-## The stat tables are not dumpable
+## The stat tables are not dumpable — but they are extractable ✅
 
-Unit, weapon and armour stats are compiled into the executable; no switch
-exposes them. The `data/` folder ships only art assets (`.tga`, `.obj`,
-`.trs` sprite archives). The executable *does* contain every unit, item, spell
-and nation **description** as plain ASCII, so the numeric tables are adjacent
-and extractable — but that is a separate reverse-engineering job.
+No switch exposes unit/weapon/armour stats, and `data/` ships only art assets.
+They are compiled into the executable as arrays of fixed-size structs with the
+names stored **inline** (not behind pointers — a pointer search finds nothing).
 
-This matters because tactical advice like *"your light infantry took free hits
-from long weapons"* needs weapon **length** values, which live in those tables.
+**The monster table is extracted** by `dom6.gamedata` — 4115 names,
+ids 0..4137, stride 888 bytes.
+
+It was located by cross-referencing ids proven from real savegames: a battle
+whose roster came from `--dumpfights` established that type 1122 is
+"Atavi Infantry", 1125 "Vanara Infantry" and 1141 "Tiger Rider". Locating those
+strings in the executable and dividing the gaps by the id differences yields
+the stride and base.
+
+The addresses are **not hard-coded**. `solve_layout()` re-derives them from the
+anchors at run time and then checks the result against ids that were *not* used
+to derive it (17 Archer, 30 Militia, 428 Assassin, 3550 Armored Sacred Tiger,
+…). If validation fails it raises rather than returning wrong names, so a game
+patch that moves the table produces a clear error instead of silent garbage.
+
+Weapon and armour tables — which hold the **length** values that repel and
+free-hit analysis depend on — are not extracted yet.

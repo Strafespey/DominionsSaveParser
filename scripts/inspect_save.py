@@ -19,6 +19,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from dom6 import find_save_root, list_savegames, load, load_savegame  # noqa: E402
 
 _NATIONS: dict[int, str] | None = None
+_MONSTERS = None
+
+
+def monster_label(type_id: int) -> str:
+    """Monster name from the executable, falling back to the raw id."""
+    global _MONSTERS
+    if _MONSTERS is None:
+        try:
+            from dom6.gamedata import monsters
+
+            _MONSTERS = monsters()
+        except Exception:  # noqa: BLE001 - the executable is optional
+            _MONSTERS = False
+    if _MONSTERS:
+        return _MONSTERS.label(type_id)
+    return f"type {type_id}"
 
 
 def nation_names() -> dict[int, str]:
@@ -92,11 +108,10 @@ def inspect_file(path: Path, args) -> int:
                       f"@0x{b.units_offset or 0:08x}")
                 for owner, side in sorted(b.order_of_battle().items()):
                     label = nations.get(owner, "Independents" if owner == 0 else f"nation {owner}")
-                    types = ", ".join(
-                        f"type {t}x{n}" for t, n in side["by_type"].most_common()
-                    )
-                    print(f"        {label.split(',')[0]:<28} "
-                          f"{side['commanders']} cmd, {side['units']} units | {types}")
+                    print(f"        {label.split(',')[0]} "
+                          f"({side['commanders']} cmd, {side['units']} units)")
+                    for t, n in side["by_type"].most_common():
+                        print(f"            {n:4d} x {monster_label(t)}")
             else:
                 print("      combatants          : none found "
                       "(assassination replays are not decoded yet)")

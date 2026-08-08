@@ -22,6 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dom6.engine import Engine, EngineError  # noqa: E402
+from dom6.gamedata import GameDataError, MonsterTable  # noqa: E402
 
 DEFAULT_OUT = Path(__file__).resolve().parent.parent / "data" / "reference"
 
@@ -64,6 +65,17 @@ def main() -> int:
     rits = engine.summon_rituals()
     write_json(args.out / "summon_rituals.json", rits)
     print(f"  {len(rits)} summon rituals")
+
+    print("\nmonster table (extracted from the executable)")
+    try:
+        table = MonsterTable.from_exe(args.exe)
+    except GameDataError as exc:
+        print(f"  skipped: {exc}")
+    else:
+        table.save(args.out / "monsters.json")
+        print(f"  {len(table)} monsters, ids 0..{table.layout.highest_id} "
+              f"(stride {table.layout.stride})")
+        print(f"  wrote {(args.out / 'monsters.json')}")
 
     return 0
 
