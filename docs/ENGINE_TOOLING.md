@@ -239,8 +239,49 @@ confirmed across the whole table by inspection:
 | Deer Tribe Warrior | Spear (len 3), Javelin |
 | Armored Sacred Tiger | Bite, Claw (both natural → length 0) |
 
-**Armour** lives in a third table at stride 104 (Buckler, Kite Shield, Tower
-Shield were located) but is not extracted yet, so armour ids stay raw.
+### Armour table ✅
+
+298 entries, stride 104, ids `0` Nothing, `1` Buckler, `2` Shield,
+`3` Kite Shield, `4` Tower Shield, `5` Leather Cuirass … `19` Full Plate Mail,
+`20` Iron Cap, `21` Full Helmet.
+
+| Field | Offset | Notes |
+|---|---|---|
+| slot | `+36` | `1` head, `2` body, `5` shield |
+| protection | `+38` | where the piece actually covers |
+| body protection | `+42` | averaged over the whole body |
+| weight | `+68` | rises with bulk (Buckler 1, Full Plate Mail 25) ❓ |
+
+**Two protection fields, and the difference matters.** A Plate Cuirass reads
+21 at `+38` but only 8 at `+42`, because it covers the torso alone; Full Plate
+Mail reads 21 in both. `+42` is the figure that adds to a unit's natural
+protection.
+
+`MonsterTable.total_protection()` sums natural protection with **body armour
+only** — helmets and shields protect their own areas rather than raising
+overall protection, so including them would overstate it. Shields are reported
+separately as `+shield`.
+
+The base was anchored on the table's own first entry (`0` = "Nothing", matching
+the weapon table's convention), *not* by automatic scoring: several candidate
+bases resolved every referenced id to a valid name, and the highest-scoring one
+was wrong — it gave Militia a Tower Shield and Heavy Infantry two body armours
+at once. The check that settles it is that each unit ends up with exactly one
+body piece, one helmet and at most one shield:
+
+```
+Militia               natural  0 -> total  3   Leather Cuirass, Reinforced Leather Cap, Shield
+Heavy Infantry        natural  0 -> total  9   Ring Mail Hauberk, Iron Cap, Shield
+Longbowman            natural  0 -> total  3   Leather Cuirass, Leather Cap
+Tiger Rider           natural  1 -> total 12   Scale Mail Hauberk, Iron Cap, Buckler
+Infantry of Ulm       natural  0 -> total 19   Full Chain of Ulm, Half Helmet of Ulm
+Black Plate Infantry  natural  0 -> total 23   Full Plate of Ulm, Full Helmet of Ulm
+Markata Archer        natural  0 -> total  0   (nothing)
+```
+
+Longbowmen carrying no shield is a good sign — a longbow needs both hands.
+`+68` was left under a neutral name because resource cost and encumbrance were
+not told apart.
 
 ### Why this matters
 

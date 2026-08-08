@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dom6.engine import Engine, EngineError  # noqa: E402
 from dom6.gamedata import (  # noqa: E402
+    ArmourTable,
     GameDataError,
     MonsterTable,
     WeaponTable,
@@ -101,6 +102,18 @@ def main() -> int:
         print(f"  {len(wt)} weapons (stride {wt.layout.stride}), "
               f"{missiles} missile, {natural} natural")
         print(f"  wrote {(args.out / 'weapons.json')}")
+
+    print("\narmour table (extracted from the executable)")
+    try:
+        at = ArmourTable.from_exe(args.exe)
+    except GameDataError as exc:
+        print(f"  skipped: {exc}")
+    else:
+        at.save(args.out / "armour.json")
+        shields = sum(1 for a in at.armours.values() if a.is_shield)
+        print(f"  {len(at)} armour pieces (stride {at.layout.stride}), "
+              f"{shields} shields")
+        print(f"  wrote {(args.out / 'armour.json')}")
 
     return 0
 

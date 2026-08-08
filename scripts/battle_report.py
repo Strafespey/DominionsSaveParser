@@ -18,18 +18,19 @@ from dom6.analysis import battle_outcomes  # noqa: E402
 
 _M = None
 _W = None
+_A = None
 _N: dict[int, str] = {}
 
 
 def tables():
-    global _M, _W, _N
+    global _M, _W, _A, _N
     if _M is None:
         try:
-            from dom6.gamedata import monsters, weapons
+            from dom6.gamedata import armours, monsters, weapons
 
-            _M, _W = monsters(), weapons()
+            _M, _W, _A = monsters(), weapons(), armours()
         except Exception:  # noqa: BLE001 - game data is optional
-            _M, _W = False, False
+            _M, _W, _A = False, False, False
         try:
             from dom6.engine import Engine
 
@@ -59,9 +60,13 @@ def unit_line(type_id: int, count: int, indent: str) -> list[str]:
             f"{x.name} rng {x.range}" if x.is_missile
             else f"{x.name} len {x.effective_length}"
         )
+    prot = m.total_protection(type_id, _A) if _A else mon.protection
+    shield = ""
+    if _A and any(a.is_shield for a in m.armour_of(type_id, _A)):
+        shield = " +shield"
     return [
         f"{indent}{count:4d} x {mon.name}",
-        f"{indent}       hp{mon.hp} sz{mon.size} prot{mon.protection} "
+        f"{indent}       hp{mon.hp} sz{mon.size} prot{prot}{shield} "
         f"att{mon.attack} def{mon.defence} {mor}"
         + (f" | {', '.join(arms)}" if arms else ""),
     ]

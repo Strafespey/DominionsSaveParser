@@ -123,6 +123,37 @@ MONSTER_OFF_MORALE = 62
 #: Mindless units store this instead of a real morale value; they never rout.
 MINDLESS_MORALE = 50
 
+#: Armour anchors -- names occurring exactly once in the executable.
+ARMOUR_ANCHORS: dict[str, int] = {
+    "Buckler": 1,
+    "Kite Shield": 3,
+    "Tower Shield": 4,
+}
+
+ARMOUR_VALIDATION: dict[int, str] = {
+    0: "Nothing",
+    2: "Shield",
+    5: "Leather Cuirass",
+    19: "Full Plate Mail",
+    20: "Iron Cap",
+    21: "Full Helmet",
+}
+
+#: Field offsets within the 104-byte armour record.
+ARMOUR_OFF_SLOT = 36  # 1 head, 2 body, 5 shield
+#: Protection where the piece actually covers.
+ARMOUR_OFF_PROTECTION = 38
+#: Protection averaged over the whole body. A Plate Cuirass reads 21 at
+#: `ARMOUR_OFF_PROTECTION` but only 8 here because it covers the torso alone,
+#: while Full Plate Mail reads 21 in both. This is the figure that adds to a
+#: unit's natural protection.
+ARMOUR_OFF_BODY_PROTECTION = 42
+#: Rises steeply with weight (Buckler 1, Full Plate Mail 25) -- resource cost
+#: or encumbrance; not disambiguated, so it is exposed under a neutral name.
+ARMOUR_OFF_WEIGHT = 68
+
+ARMOUR_SLOTS = {1: "head", 2: "body", 5: "shield"}
+
 _NAME_RE = re.compile(rb"^[\x20-\x7e]{1,63}\x00")
 _MIN_STRIDE, _MAX_STRIDE = 64, 8192
 _MAX_ID = 20000
@@ -289,6 +320,33 @@ class MonsterTable:
             return []
         wt = table or weapons()
         return [w for wid in m.weapon_ids if (w := wt.get(wid))]
+
+    def armour_of(
+        self, type_id: int, table: "ArmourTable | None" = None
+    ) -> list["Armour"]:
+        m = self.monsters.get(type_id)
+        if not m:
+            return []
+        at = table or armours()
+        return [a for aid in m.armour_ids if (a := at.get(aid))]
+
+    def total_protection(
+        self, type_id: int, table: "ArmourTable | None" = None
+    ) -> int:
+        """Natural protection plus worn body armour.
+
+        Shields and helmets are excluded: they protect their own areas rather
+        than raising overall protection, so adding them would overstate it.
+        """
+        m = self.monsters.get(type_id)
+        if not m:
+            return 0
+        worn = sum(
+            a.body_protection
+            for a in self.armour_of(type_id, table)
+            if a.slot_code == 2
+        )
+        return m.protection + worn
 
     @classmethod
     def from_exe(cls, exe: str | Path | None = None) -> "MonsterTable":
@@ -501,6 +559,89 @@ class WeaponTable:
         )
 
 
+@dataclass
+class Armour:
+    """One armour piece from the executable's table."""
+
+    id: int
+    name: str
+    slot_code: int
+    #: Protection where the piece covers.
+    protection: int
+    #: Protection averaged over the whole body -- what adds to a unit's own.
+    body_protection: int
+    weight: int
+
+    @property
+    def slot(self) -> str:
+        return ARMOUR_SLOTS.get(self.slot_code, f"slot {self.slot_code}")
+
+    @property
+    def is_shield(self) -> bool:
+        return self.slot_code == 5
+
+
+@dataclass
+class ArmourTable:
+    layout: TableLayout
+    armours: dict[int, Armour]
+
+    def __len__(self) -> int:
+        return len(self.armours)
+
+    def get(self, armour_id: int) -> Armour | None:
+        return self.armours.get(armour_id)
+
+    def label(self, armour_id: int) -> str:
+        a = self.armours.get(armour_id)
+        return a.name if a else f"armour {armour_id}"
+
+    @classmethod
+    def from_exe(cls, exe: str | Path | None = None) -> "ArmourTable":
+        path = Path(exe) if exe else _default_exe()
+        data = path.read_bytes()
+        layout = solve_layout(data, ARMOUR_ANCHORS, ARMOUR_VALIDATION)
+        out: dict[int, Armour] = {}
+        for aid in range(layout.highest_id + 1):
+            base = layout.offset_of(aid)
+            name = _read_name(data, base)
+            if not name:
+                continue
+            out[aid] = Armour(
+                id=aid,
+                name=name,
+                slot_code=data[base + ARMOUR_OFF_SLOT],
+                protection=data[base + ARMOUR_OFF_PROTECTION],
+                body_protection=data[base + ARMOUR_OFF_BODY_PROTECTION],
+                weight=data[base + ARMOUR_OFF_WEIGHT],
+            )
+        return cls(layout=layout, armours=out)
+
+    def save(self, path: str | Path) -> None:
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(
+            json.dumps(
+                {
+                    "layout": self.layout.__dict__,
+                    "armours": {
+                        str(a.id): {
+                            "name": a.name,
+                            "slot": a.slot,
+                            "protection": a.protection,
+                            "body_protection": a.body_protection,
+                            "weight": a.weight,
+                        }
+                        for a in self.armours.values()
+                    },
+                },
+                indent=2,
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+
 def _default_exe() -> Path:
     game = find_game_dir()
     if not game:
@@ -513,6 +654,15 @@ def _default_exe() -> Path:
 
 _MONSTER_CACHE: MonsterTable | None = None
 _WEAPON_CACHE: WeaponTable | None = None
+_ARMOUR_CACHE: "ArmourTable | None" = None
+
+
+def armours(exe: str | Path | None = None) -> "ArmourTable":
+    """Process-wide cached armour table."""
+    global _ARMOUR_CACHE
+    if _ARMOUR_CACHE is None:
+        _ARMOUR_CACHE = ArmourTable.from_exe(exe)
+    return _ARMOUR_CACHE
 
 
 def monsters(exe: str | Path | None = None) -> MonsterTable:
