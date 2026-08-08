@@ -149,7 +149,12 @@ _OFF_UNIT_SQUAD = 20  # u16 squad id, 0xFFFF on commanders
 _OFF_UNIT_LINK = _OFF_UNIT_SQUAD  # backwards-compatible alias
 _OFF_UNIT_TYPE = 23  # u16, monster type id  [verified]
 _OFF_UNIT_OWNER = 55  # u8, owning nation id [verified]
+_OFF_UNIT_POS_X = 57  # u8, per-squad position; 0xFF = unset
+_OFF_UNIT_POS_Y = 58  # u8
 _OFF_UNIT_NUMBER = 164  # u16, per-game unit number
+
+#: Position bytes read this when the unit has no placement of its own.
+_POS_UNSET = 0xFF
 
 
 @dataclass
@@ -176,6 +181,18 @@ class VcrUnit:
     #: Verified: grouping by this field reproduces the roster stacks exactly
     #: (15 Archer / 26 Militia / 22 Light Infantry as three separate squads).
     link: int
+    #: Placement of this unit's squad, or None when unset.
+    #:
+    #: Shared by every member of a squad and consistent between the .trn and
+    #: the .2h (squad 5063 reads (100, 4) and squad 5048 (93, 4) in both).
+    #: In a battle the two sides sit apart -- Phaeacia's squad at (82, 14)
+    #: against Bandar Log's at (140, 20). Commanders and engine-deployed
+    #: defenders read 0xFF/0xFF.
+    #:
+    #: The coordinate space is not pinned down: it is probably the army-setup
+    #: grid the player arranges squads on, but that is not proven, so treat
+    #: the numbers as relative rather than absolute.
+    position: tuple[int, int] | None = None
     raw: bytes = field(repr=False, default=b"")
 
     @property
@@ -261,6 +278,7 @@ def _read_records(data: bytes, offset: int, count: int) -> list[VcrUnit]:
     for i in range(count):
         o = offset + i * UNIT_RECORD_SIZE
         rec = data[o : o + UNIT_RECORD_SIZE]
+        px, py = rec[_OFF_UNIT_POS_X], rec[_OFF_UNIT_POS_Y]
         units.append(
             VcrUnit(
                 offset=o,
@@ -268,6 +286,7 @@ def _read_records(data: bytes, offset: int, count: int) -> list[VcrUnit]:
                 owner=rec[_OFF_UNIT_OWNER],
                 unit_number=struct.unpack_from("<H", rec, _OFF_UNIT_NUMBER)[0],
                 link=struct.unpack_from("<H", rec, _OFF_UNIT_LINK)[0],
+                position=None if px == _POS_UNSET and py == _POS_UNSET else (px, py),
                 raw=rec,
             )
         )
@@ -283,9 +302,14 @@ _MAX_TYPE_ID = 40000
 #: A genuine unit array belongs to at most this many nations.
 _MAX_OWNERS_PER_ARRAY = 2
 
+#: Minimum fraction of distinct unit numbers within an array.
+_MIN_UNIT_NUMBER_UNIQUENESS = 0.9
+
 
 def find_unit_arrays(
-    data: bytes, min_length: int = 4
+    data: bytes,
+    min_length: int = 4,
+    known_types: set[int] | None = None,
 ) -> list[tuple[int, list[VcrUnit]]]:
     """Find every unit array in a save file, not just those inside replays.
 
@@ -302,15 +326,39 @@ def find_unit_arrays(
     duplicates.
     """
     def coherent(off: int, n: int) -> bool:
-        """A real array is owned by at most a couple of nations.
+        """Reject runs that are really byte-shifted aliases of a real array.
 
-        A run shifted a few bytes off a genuine array still passes the
-        per-field plausibility test, but its "owner" column is really some
-        other field and scatters across many values. Genuine arrays seen so
-        far carry one or two owners (a battle has exactly two sides).
+        A run a few bytes off a genuine array still passes the per-field
+        plausibility test, but the columns it reads are other fields:
+
+        * its "owner" column scatters across many values, whereas a genuine
+          array carries one or two (a battle has exactly two sides);
+        * its "type" column reads the high half of some other u16, so the ids
+          come out as multiples of 256 and often fall outside the real id
+          range. Passing `known_types` (from the extracted monster table)
+          makes this test decisive.
         """
-        owners = {data[off + i * UNIT_RECORD_SIZE + _OFF_UNIT_OWNER] for i in range(n)}
-        return len(owners) <= _MAX_OWNERS_PER_ARRAY
+        owners, types, unrs = set(), [], []
+        for i in range(n):
+            rec = off + i * UNIT_RECORD_SIZE
+            owners.add(data[rec + _OFF_UNIT_OWNER])
+            types.append(struct.unpack_from("<H", data, rec + _OFF_UNIT_TYPE)[0])
+            unrs.append(struct.unpack_from("<H", data, rec + _OFF_UNIT_NUMBER)[0])
+
+        # Unit numbers are per-unit identifiers, so a genuine array has almost
+        # no duplicates. This is by far the sharpest test: measured across a
+        # real turn file, genuine arrays score 1.00 while every byte-shifted
+        # alias scores between 0.01 and 0.17.
+        if len(set(unrs)) < n * _MIN_UNIT_NUMBER_UNIQUENESS:
+            return False
+        if len(owners) > _MAX_OWNERS_PER_ARRAY:
+            return False
+        if known_types is not None:
+            if sum(t in known_types for t in types) < len(types) * 0.9:
+                return False
+        elif sum(t % 256 == 0 for t in types) > len(types) * 0.5:
+            return False
+        return True
 
     runs = [
         r

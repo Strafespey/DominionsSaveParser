@@ -151,7 +151,9 @@ that same host wrote.
 | `+27` | u8 | file-global stamp — see warning below |
 | `+29` | u8 | constant per side ❓ |
 | `+55` | u8 | ✅ **owner nation id** (`0` = independents) |
-| `+164` | u16 | unit number 🟡 |
+| `+57` | u8 | ✅ **squad position x**; `0xFF` = unset |
+| `+58` | u8 | ✅ **squad position y**; `0xFF` = unset |
+| `+164` | u16 | ✅ unit number — unique per record |
 
 Grouping by `+20` reproduces the roster stacks exactly, which is what confirms
 it as the squad id:
@@ -189,34 +191,45 @@ pairing. `+20 == 0xFFFF` selected exactly the 4 commanders the roster reported.
 > silently finds nothing in other files. Records are located by field
 > plausibility, requiring a run to share whatever stamp its first record has.
 
-### Battlefield placement is NOT in the replay ❌
+### Squad placement — `+57` / `+58` ✅
 
-Searched for and **not found**. Recording the negative result so it is not
-re-investigated:
+> **Correction.** An earlier revision of this document recorded placement as
+> *not present*. That was wrong: the first search looked only for fields that
+> separated cleanly **by owner**, and placement is constant **per squad**, so
+> it was filtered out before it could be seen.
 
-- **No per-unit x/y in the combat record.** Every field that separates cleanly
-  by owner turned out to be one already identified (`+20` squad, `+23` type,
-  `+164` unit number). Nothing in the 173 bytes behaves like a coordinate.
-- **No squad position table before the unit array.** The ~47 KB preceding the
-  array in one replay contains none of that battle's squad ids
-  (`18, 35, 63, 5048, 5063`) — a single coincidental match for `35` aside.
+Bytes `+57` and `+58` hold the squad's position. `0xFF/0xFF` means unset.
 
-The most likely explanation is that Dominions **recomputes deployment** at
-battle start from squad composition, formation and battle orders, all of which
-are deterministic given the stored seed. The engine's own strings support this:
-`Box formation`, `Line formation`, `Skirmish formation`, sparse line, and
-*"Units with the Guard Commander order always deploy next to the commander they
-are guarding."*
+Every member of a squad carries the same pair, and it is **consistent between
+the `.trn` and the `.2h`** — squad 5063 reads `(100, 4)` and squad 5048
+`(93, 4)` in both files, which is the check that confirms it is real stored
+state rather than a coincidence.
 
-So the squad layout the player arranges on the army-setup screen persists with
-the **army**, not with the battle. To recover front/back placement, map the
-army records in the `.trn` / `.2h` (squad definitions with their placement and
-formation) rather than looking inside the replay.
+In a battle the two sides sit apart:
 
-What *is* available today from the replay: full squad composition per side,
-which unit types are grouped together, and each type's weapons with reach and
-range — enough to reason about reach mismatches and missile duels without
-knowing exact coordinates.
+```
+Bandar Log
+  squad 5063 (1)  at (140, 20)   1 x Atavi Infantry
+  squad 5075 (10) at (140, 20)  10 x Markata Archer
+  squad 5113 (26) at (140, 20)  13 x Tiger Rider + 13 mounts
+  commanders                     (unset)
+Phaeacia
+  squad 183 (49)  at (82, 14)   49 x Longbowman
+```
+
+Commanders read unset, as do squads the engine deploys itself (independent
+province defenders show `0xFF/0xFF` throughout).
+
+**What is not pinned down** is the coordinate space. It is probably the
+army-setup grid the player arranges squads on, but that is unproven, and in one
+battle three separate squads shared a single pair while in another they
+differed — so treat the values as relative, not absolute. Deriving a reliable
+"front row versus back row" from them needs more evidence.
+
+Formation (line / sparse line / box / skirmish) and battle orders are still
+unmapped; the engine strings confirm they exist
+(*"Units with the Guard Commander order always deploy next to the commander
+they are guarding"*).
 
 ### Locating arrays outside replays 🟡
 
@@ -224,13 +237,23 @@ The same 173-byte record is used for **armies standing on the map**, not just
 combatants in a replay. `dom6.vcr.find_unit_arrays()` scans a whole file for
 them.
 
-This is **best-effort**: the record has no magic number, so a run offset by a
-few bytes from a genuine array still passes a per-field plausibility test.
-Overlapping candidates are resolved in favour of the longest, and arrays with
-more than two distinct owners are rejected — but false positives remain
-(clusters of type ids like `2048`/`255`/`3072` in `ftherlnd` are aliases, not
-armies). Inside a replay, where the two nation ids are known and can constrain
-the owner field, detection is reliable and verified.
+The record has no magic number, so a run offset by a few bytes from a genuine
+array still passes a naive per-field plausibility test. Three filters separate
+them, in increasing order of power:
+
+1. Overlapping candidates resolve in favour of the longest.
+2. Arrays with more than two distinct owners are rejected.
+3. **Unit-number uniqueness** (`+164`) is the decisive test. Unit numbers are
+   per-unit identifiers, so a genuine array has almost no duplicates. Measured
+   across a real turn file, genuine arrays score **1.00** while every
+   byte-shifted alias scores between **0.01 and 0.17**.
+
+Passing `known_types` (the extracted monster id set) tightens it further.
+
+Without test 3 the detector was actively wrong: a 101-record alias of
+"Wailing Lady" — 98 of whose records claimed to be commanders — outranked and
+suppressed the player's real armies, so a scan of the player's own turn file
+reported *no* armies at all.
 
 ### Consequences for analysis
 
