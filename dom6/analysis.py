@@ -66,6 +66,21 @@ class BattleOutcome:
         return next((s for s in self.sides if s.nation == nation), None)
 
 
+def _known_monster_ids() -> set[int] | None:
+    """Real monster ids, for rejecting garbage unit arrays.
+
+    Optional: the ids come from tables extracted from the game executable,
+    which is not always present. Without them the array scan falls back to a
+    weaker structural test, so this returns None rather than failing.
+    """
+    try:
+        from .gamedata import monsters
+
+        return set(monsters().monsters)
+    except Exception:
+        return None
+
+
 def battle_outcomes(save: SaveFile) -> list[BattleOutcome]:
     """Infer per-battle losses from a turn file.
 
@@ -81,7 +96,12 @@ def battle_outcomes(save: SaveFile) -> list[BattleOutcome]:
 
     spans = [(b.offset, b.end_offset or len(save.data)) for b in battles]
     alive: set[int] = set()
-    for off, units in find_unit_arrays(save.data, min_length=2):
+    for off, units in find_unit_arrays(
+        save.data,
+        min_length=2,
+        known_types=_known_monster_ids(),
+        exclude_spans=spans,
+    ):
         if any(a <= off < b for a, b in spans):
             continue
         alive.update(u.unit_number for u in units)

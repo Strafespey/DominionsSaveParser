@@ -217,22 +217,71 @@ def find_unit_records(
 ) -> tuple[list[VcrUnit], int | None]:
     """Locate the combatant array within a replay body.
 
-    Returns (units, array_offset). The array is found by taking the longest
-    run of positions spaced `UNIT_RECORD_SIZE` apart that all carry the record
-    signature byte, so it does not depend on knowing the size of the header
-    that precedes it.
+    Returns (units, array_offset). Candidate runs are positions spaced
+    `UNIT_RECORD_SIZE` apart that all carry the record signature byte, so
+    finding them does not depend on knowing the size of the header that
+    precedes it.
 
     `allowed_owners` (normally the replay's two nation ids) rejects candidate
     records whose owner field is not one of the battle's participants. Without
     it, a lone byte coincidence can outscore a genuine short array -- which is
     what happens on two-combatant assassination replays.
+
+    Candidates are ranked by `_run_score`, **not** by length. Picking the
+    longest run silently returns the wrong answer whenever a byte-shifted
+    alias of the real array is as long as it is or longer: in a turn-3
+    T'ien Ch'i .trn the genuine 145-record array at +0 lost to a 146-record
+    alias at +7, which reported one side of a two-sided battle and resolved
+    every unit to the same wrong monster id. The alias is trivially
+    distinguishable -- it read 4 distinct unit numbers across 106 records
+    where the real array reads 106 -- but only if the ranking looks.
     """
 
     runs = _scan_runs(data, start, end, allowed_owners)
     if not runs:
         return [], None
-    best_off, best_len = max(runs, key=lambda t: t[1])
+    best_off, best_len = max(
+        runs, key=lambda t: _run_score(data, t[0], t[1], allowed_owners)
+    )
     return _read_records(data, best_off, best_len), best_off
+
+
+def _run_fields(
+    data: bytes, off: int, n: int
+) -> tuple[set[int], list[int], list[int]]:
+    """Read the (owner, type, unit number) columns of a candidate run."""
+    owners, types, numbers = set(), [], []
+    for i in range(n):
+        rec = off + i * UNIT_RECORD_SIZE
+        owners.add(data[rec + _OFF_UNIT_OWNER])
+        types.append(struct.unpack_from("<H", data, rec + _OFF_UNIT_TYPE)[0])
+        numbers.append(struct.unpack_from("<H", data, rec + _OFF_UNIT_NUMBER)[0])
+    return owners, types, numbers
+
+
+def _run_score(
+    data: bytes, off: int, n: int, allowed_owners: set[int] | None
+) -> tuple:
+    """Rank a candidate unit array; larger sorts better.
+
+    The components, in decreasing authority:
+
+    1. **Unit numbers are distinct.** Unit numbers identify a unit within a
+       game, so a genuine array has essentially no duplicates. Measured on
+       real files, genuine arrays score 1.00 and byte-shifted aliases score
+       0.01-0.17, which makes this the single decisive test.
+    2. **How many of the battle's participants appear.** A replay has two
+       sides; an alias typically reads a column that is constant, so it
+       collapses to one apparent owner.
+    3. **Type ids do not look like the high half of a u16.** A shifted read
+       yields ids that are multiples of 256 far more often than chance.
+    4. **Length**, only as a tiebreak between otherwise equal candidates.
+    """
+    owners, types, numbers = _run_fields(data, off, n)
+    distinct = len(set(numbers)) >= n * _MIN_UNIT_NUMBER_UNIQUENESS
+    sides = len(owners & allowed_owners) if allowed_owners else len(owners)
+    unshifted = 1.0 - sum(t % 256 == 0 for t in types) / n
+    return (distinct, sides, unshifted, n)
 
 
 def _valid_record(data: bytes, off: int, allowed_owners: set[int] | None) -> bool:
@@ -310,6 +359,7 @@ def find_unit_arrays(
     data: bytes,
     min_length: int = 4,
     known_types: set[int] | None = None,
+    exclude_spans: list[tuple[int, int]] | None = None,
 ) -> list[tuple[int, list[VcrUnit]]]:
     """Find every unit array in a save file, not just those inside replays.
 
@@ -324,7 +374,37 @@ def find_unit_arrays(
     also parses as "plausible". Overlapping candidates are therefore resolved
     greedily in favour of the longest, which discards those phase-shifted
     duplicates.
+
+    `exclude_spans` marks regions that hold replay bodies. Outside them an
+    array is an army standing on the map, which belongs to exactly **one**
+    nation, so multi-owner runs there are rejected outright. This matters at
+    `min_length=2`: the unit-number uniqueness test is statistically powerless
+    over two or three records -- three random u16s are almost always distinct
+    -- so without it, hundreds of byte coincidences enter the result. On a
+    turn-4 T'ien Ch'i .trn they were 149 of the 360 unit numbers found, and
+    a false unit number can vouch for a unit that actually died.
+
+    `known_types` (monster ids from the extracted tables) rejects runs whose
+    type column does not resolve to real units. Passing it is what stops a
+    short garbage run from being reported as, say, a Wailing Lady standing in
+    a T'ien Ch'i province on turn 4.
     """
+    spans = exclude_spans or []
+
+    def max_owners(off: int) -> int:
+        """How many nations may share this array.
+
+        Without `exclude_spans` the caller has not told us where the replays
+        are, so every offset has to be treated as possibly inside one --
+        applying the single-nation rule blindly would reject exactly the
+        two-sided battle arrays this function exists to find.
+        """
+        if not spans:
+            return _MAX_OWNERS_PER_ARRAY
+        if any(a <= off < b for a, b in spans):
+            return _MAX_OWNERS_PER_ARRAY
+        return 1
+
     def coherent(off: int, n: int) -> bool:
         """Reject runs that are really byte-shifted aliases of a real array.
 
@@ -351,7 +431,8 @@ def find_unit_arrays(
         # alias scores between 0.01 and 0.17.
         if len(set(unrs)) < n * _MIN_UNIT_NUMBER_UNIQUENESS:
             return False
-        if len(owners) > _MAX_OWNERS_PER_ARRAY:
+        # A replay holds both sides; an army on the map holds one nation.
+        if len(owners) > max_owners(off):
             return False
         if known_types is not None:
             if sum(t in known_types for t in types) < len(types) * 0.9:
