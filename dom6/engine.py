@@ -292,6 +292,41 @@ class SandboxedHost:
             self._tmp.cleanup()
             self._tmp = None
 
+    def combat_log(self, debug_level: int = 3, timeout: float = 900.0) -> tuple[str, EngineResult]:
+        """Host one turn at debug level N and return the engine's combat log.
+
+        This is the per-hit narrative the save file does not contain: every
+        attack, hit location, weapon, damage roll versus protection roll, and
+        kill.
+
+        ```
+        Damage roll 14+9 vs prot roll of 0+13 of Longdead = 10 points of damage
+        Damage exceeded maximum possible in hit area, reduced to 3 points
+        Cataphracted War Horse hit Longdead in arm with Hoof for 3 points
+        ```
+
+        **The log does not go to stdout.** It is written to `log.txt` in the
+        *game* directory, which is why raising `-d` looked like it did nothing
+        for so long. Two consequences worth knowing:
+
+        1. ⚠️ `log.txt` is **truncated and rewritten on every debug run**, and
+           it lives outside the sandbox — `DOM6_SAVE` protects savegames, not
+           this file. Any previous contents are lost.
+        2. It is large: a single hosted turn produced ~44 MB.
+
+        ⚠️ Like `dump_fights`, this **hosts**, so the battles logged are the
+        *next* turn's, freshly simulated from current orders — not a replay of
+        the battles already in your `.trn`. Replaying a past battle needs the
+        `Playvcr` path, which requires an OpenGL context.
+        """
+        args = ["--textonly", "--vcrdebug"]
+        args += ["-d"] * max(1, debug_level)
+        args += ["--host", self.source.name]
+        result = self.engine.run(args, save_root=self.save_root, timeout=timeout)
+        log = self.engine.game_dir / "log.txt"
+        text = log.read_text(encoding="utf-8", errors="replace") if log.exists() else ""
+        return text, result
+
     def dump_fights(self, timeout: float = 600.0) -> tuple[list[DumpedFight], EngineResult]:
         """Host one turn with `--dumpfights` and parse the battle rosters."""
         result = self.engine.run(

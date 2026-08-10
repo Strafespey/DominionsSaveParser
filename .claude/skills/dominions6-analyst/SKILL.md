@@ -30,6 +30,23 @@ This gives you, per battle: both sides, squads with positions, every unit type
 with hp / size / protection / attack / defence / morale, weapons with reach and
 range, and inferred losses.
 
+**2b. Get the empire picture.** For anything strategic rather than tactical —
+"how am I doing", "what should I build", "am I behind" — read the score-graph
+history instead of guessing:
+
+```sh
+py scripts/empire_report.py <GameName>              # all nations, latest turn
+py scripts/empire_report.py <GameName> --history    # your own turn by turn
+py scripts/empire_report.py <GameName> --metric research
+```
+
+Provinces, forts, gold income, gem income, research per turn, dominion and
+army size — for every nation the player can see, on every turn of the game.
+Verified against the engine's own score dump. Two caveats worth stating: the
+newest row **lags the turn number by one**, and these are *rates and totals*,
+not stockpiles — the treasury, gem inventory and per-school research levels
+are not readable yet, so do not claim them.
+
 **3. Consult the rules.** Read `kb/rules-cheatsheet.md` (~1.6k tokens) — it
 covers most questions. Only if it does not, use `kb/index.md` to route to one
 chapter (`kb/sections/06-combat.md` is usually the one), or grep
@@ -81,10 +98,20 @@ battles are usually won or lost:
 This is a reverse-engineered reader. Say what is measured, what is inferred,
 and what is unknown. Concretely:
 
-- **Enemy losses are not confirmed kills.** A turn file only shows what its
-  owner can see, so enemy survivors are invisible whether they died or walked
-  away. `SideOutcome.observable` is `False` for them. Say "no longer visible to
-  you", not "you killed 48".
+- **⚠️ Never infer who won from the casualty numbers. A defeat looks like a
+  crushing victory.** Enemy survivors are invisible in a turn file, and losing
+  a battle also loses sight of the province, so the enemy reads as ~100%
+  destroyed *precisely when you lost*. Every enemy side in every battle so far
+  has reported 88–100% losses. This has already produced one confidently wrong
+  analysis: a battle reported as "won at heavy cost" was a lost province.
+
+  **The outcome comes from province ownership, nothing else.** The battle
+  report prints it per battle; `dom6.owner_of(save, name)` gives it directly.
+  It returns `None` when the province record was not found — that means
+  *unknown*, never "not yours". About 10% of provinces are missed.
+
+- **Enemy losses are not confirmed kills.** Say "no longer visible to you",
+  not "you killed 48". `SideOutcome.observable` is `False` for them.
 - **Your own losses are reliable**, subject to the parser finding every map
   army.
 - **There is no blow-by-blow log.** The save stores the battle setup plus an RNG

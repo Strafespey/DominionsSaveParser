@@ -103,6 +103,50 @@ The `calc` vs `loaded` comparison is the giveaway: the engine recomputes each
 round and asserts it matches the stored checkpoint. That is also why replays
 break after a patch.
 
+### Size accounting — there is no room for a log ✅
+
+The engine-string argument above is suggestive; this is the measurement.
+Reproduce with `py scripts/vcr_anatomy.py <GameName>`.
+
+Each replay section splits into three parts:
+
+| Battle | Combatants | Header | Units (n × 173) | Tail |
+|---|---|---|---|---|
+| Shamballac | 199 | 47,617 B (82% `0xFF`) | 34,427 B | **1,974 B** |
+| Gold Mountains | 8 | 49,377 B (79% `0xFF`) | 1,384 B | **642 B** |
+| Trackless Woods | 84 | 46,821 B (83% `0xFF`) | 14,532 B | **1,639 B** |
+| Trackless Woods | 89 | 47,811 B (82% `0xFF`) | 15,397 B | **1,178 B** |
+
+Two facts kill the stored-log hypothesis:
+
+1. **The header does not scale with the battle.** The 8-combatant fight has a
+   *larger* header than the 199-combatant one. It is 79–83% `0xFF` — fixed-size
+   tables initialised to −1 — and holds nation slots (mostly the string
+   `unknown`, for nations the player has never met), the map filename,
+   `IOversion 6.35`, and the pretender's name. It is per-battle context, and
+   its size is essentially constant at ~47–49 KB across two different games.
+
+2. **The tail is one to two orders of magnitude too small.** It is the only
+   part that scales with the battle (roughly 600 B fixed plus ~7 B per
+   combatant). A minimal per-hit event — attacker, target, damage, flags —
+   cannot be under ~6 bytes. Shamballac's 199 combatants over even 30 rounds
+   would need ≥ 35,820 B. The tail holds 1,974 B: **5.5%** of the floor.
+
+The tail is the right size for the **per-round checksums** the engine's strings
+describe, plus outcome data. It is not a log.
+
+Corroborating detail: the whole 422 KB turn file also carries 121 province
+records, the full score history and every message. There is nowhere else for
+36 KB of combat log to hide.
+
+> **This does not mean the replay is lossy.** Initial state plus a stored seed
+> reproduces a deterministic simulation exactly, frame by frame, at any speed.
+> From the viewer's side "recorded" and "reproducible" are indistinguishable —
+> which is why the in-game replay viewer is not evidence either way. The
+> consequence for *this* project is narrower: there is no per-hit record to
+> read, so casualties must be inferred (§4c) and a blow-by-blow narrative has
+> to come from the engine, not the file.
+
 ### Locating replays
 
 Each replay is introduced by the literal 8-byte ASCII marker **`_vcr_VCR`**,
@@ -301,10 +345,27 @@ reported *no* armies at all.
 
 - Army composition, placement, equipment, orders and casualties are all
   recoverable from the save.
-- A true per-hit log requires the **engine** to replay the fight. The engine has
-  the format strings for it (`damage %d on %s (unr%d), spec0x%x ba%d`,
-  `%s attacks with %s`, `Shield hit, incoming damage reduced by %d`) but they
-  did not appear at debug level `-d -d`. Reaching them is an open problem.
+- A true per-hit log requires the **engine** to replay the fight — the file
+  provably does not contain one (see the size accounting in §4). Nearby engine
+  strings show the replay machinery is **seed-driven and file-backed**:
+
+  ```
+  play vcr (seed %d)          playvcr nbr %d (seed %d) ok %d
+  %s/%d_%d.vcr   %s/5_0.vcr   failed to open vcr
+  readvcr, lnr %d, seed %d    readvcr: bad CHECK
+  crvcr: bad seed             crvcr: put land %d, owner %d, fortowner %d, p...
+  ```
+
+  Note `%s/%d_%d.vcr`: the engine reads and writes **standalone `.vcr` files**,
+  not only the replays embedded in a `.trn`, and both `crvcr:` (create) and
+  `readvcr:` (read) paths exist, so the format round-trips. No such files exist
+  during normal play. Making the engine emit one is the most promising lead for
+  driving a re-simulation headlessly.
+
+  The format strings themselves are present and unambiguous —
+  `damage %d on %s (unr%d), spec0x%x ba%d`, `%s attacks with %s`,
+  `Shield hit, incoming damage reduced by %d` — but they do not appear on
+  stdout at any debug level tried so far (see `ENGINE_TOOLING.md`).
 
 ---
 
@@ -363,19 +424,68 @@ and keep the `.2h`. Then change *only* that script and end turn again. Diffing
 two `.2h` files that differ in exactly one known way localises the field
 immediately.
 
+## 4c. ⚠️ Inferred casualties cannot decide a battle
+
+**A defeat reads as a crushing victory.** This bug shipped, produced a
+confident wrong analysis of a real game, and is the reason `owner` was decoded.
+
+The chain: `battle_outcomes()` counts a unit lost if it is not visible on the
+map afterwards. A turn file only shows what its owner can see, so enemy
+survivors are *never* visible — and losing a battle also loses sight of the
+province, which makes the enemy look annihilated. Every enemy side ever
+reported for one real game:
+
+```
+turn 13  Koromoo   100%      turn 20  Shamballac      99%   <- actually LOST
+turn 13  S'catli   100%      turn 20  Gold Mountains  88%   <- actually LOST
+turn 13  Pnophia    98%
+```
+
+The figure is not measuring the enemy. **Never present an enemy loss fraction
+as evidence of an outcome.** Use province ownership (§5). `SideOutcome.caveat`
+carries this, and `tests/test_province_owner.py` pins it.
+
+Own-side losses remain usable: your own survivors *are* on the map, including
+after a retreat.
+
 ## 5. Province records 🟡
 
-Provinces occupy the bulk of a `.trn`. Each record contains the province name
-**twice** in succession (e.g. `Redbud Grove` at `0x1BC` and again at `0x1C9`) —
-probably the current name and the original/base name, since renaming is a game
-feature. Event messages for the province follow inline:
+Each record contains the province name **twice** in immediate succession
+(e.g. `Redbud Grove` at `0x1BC` and again at `0x1C9`) — probably current name
+and base name, since renaming is a game feature. Event messages for the
+province follow inline:
 
 ```
 @0x00E95  "Early Fall in the year 0 of the ascension wars:"
 @0x00EC7  "Sleepy Mountains was conquered by Ulm"
 ```
 
-Exact field layout is not yet mapped.
+### Owner 🟡
+
+| Offset | Type | Meaning |
+|---|---|---|
+| end of 2nd name `+34` | u8 | 🟡 **owner nation id**; `0` = independent *or* never seen |
+
+Located by constraint rather than by mapping the record: it is the only offset
+whose per-nation counts reproduce the score record's province column (§7)
+across `ftherlnd` and `.trn` in two different games. Cross-checks that hold:
+no nation is ever *over*counted, the player's own count matches exactly in
+their `.trn`, and nations the player has never met read 0 there while reading
+correctly in `ftherlnd`.
+
+⚠️ **Enumeration is incomplete — about 90% of owned provinces are found.**
+Every nation comes up 1–2 short; none over. Some province records evidently do
+not match the twice-repeated-name signature (renamed provinces are the leading
+suspect). So a province that is found is reliable; a province that is missing
+is **unknown**, not unowned. `owner_of()` returns `None` for that case and
+callers must not read it as "nobody".
+
+Battle replays also store their province name twice (`+0x41`), so replay spans
+must be excluded or they appear as phantom province records — one such phantom
+reported a province as owned by the player when the real record said otherwise.
+
+The rest of the record layout is still unmapped.
+
 
 ---
 
@@ -388,8 +498,70 @@ Nations the player has not met read `unknown`.
 
 ---
 
-## 7. Open questions
+## 7. Score-graph history — empire statistics ✅
 
+Every `ftherlnd` and `.trn` carries the data behind the in-game score graphs
+as a flat array of **22-byte records, one per (turn, nation)**. A turn-13
+`.trn` of a six-nation game holds 78 records: six nations × turns 0–12.
+`.2h` order files carry none.
+
+| Offset | Type | Meaning |
+|---|---|---|
+| `+0` | u16 | ✅ turn |
+| `+2` | u16 | ✅ nation id |
+| `+4` | u16 | ✅ provinces held |
+| `+6` | u16 | ✅ forts |
+| `+8` | u16 | ✅ **income** — gold per turn |
+| `+10` | u16 | ✅ **gem income** — gems per turn, all paths summed |
+| `+12` | u16 | ❓ `0` in every record seen |
+| `+14` | u16 | ✅ **research** — research points per turn |
+| `+16` | u16 | ✅ **dominion** — total dominion strength |
+| `+18` | u16 | ✅ **army size** — units, mounts and commanders included |
+| `+20` | u16 | ❓ `0` in every record seen |
+
+`scores.html` has one column with no home above — Victory Points — and it read
+0 for every nation in both sample games, so it is most likely `+12` or `+20`.
+
+### How it was found, and how it is verified
+
+`--scoredump` makes the engine write its own `scores.html` after hosting
+(see `ENGINE_TOOLING.md`). That is **labelled ground truth for six nations at
+once**, which turns the search into known-plaintext: find offsets whose values
+reproduce the whole table. Six simultaneous constraints per metric leave no
+room for coincidence.
+
+The first search assumed `offset = base + nation_id * stride` and found
+nothing; the array is indexed by **participation slot**, not nation id, and
+the record is headed by its own `(turn, nation)` pair.
+
+Verification is a genuine holdout: the layout was derived from a MA T'ien Ch'i
+game and then checked against a **different game** (Bandar Log, different
+nations, different turn) by hosting a sandboxed copy with `--scoredump`.
+**42 of 42 values matched** — six nations × seven metrics. That check is
+frozen as `tests/test_scores.py`.
+
+### Locating the array
+
+It has no magic number. `dom6.scores.find_score_history()` identifies it by
+shape: records cycle through a fixed nation set in a fixed order, and the turn
+counter advances by exactly one each time the cycle wraps. Runs shorter than
+three turns are rejected, because a handful of records occurs by chance in the
+sparse zero/`0xFF` regions that make up most of a save.
+
+### Two things to know before using it
+
+- **The newest record lags the header turn by one.** The array is appended to
+  when the host generates the following turn, so a turn-13 `.trn` ends at
+  turn 12.
+- **`income`, `gem_income` and `research` are per-turn rates**, not stockpiles.
+  The **treasury**, the **gem inventory by path**, and **research levels per
+  school** are stored elsewhere and are still unmapped — see the roadmap.
+
+---
+
+## 8. Open questions
+
+- [ ] Treasury (gold on hand), gem stock per path, research level per school.
 - [ ] Province record field layout and length.
 - [ ] Unit/army records: unit type id, count, squad number, x/y battlefield placement.
 - [ ] Commander records: equipment slots, magic paths, battle script (spell order).

@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .obfuscation import deobfuscate, read_cstring
 from .reader import Cursor
+from .scores import ScoreRecord, find_score_history
 from .vcr import VcrSection, find_battles
 
 MAGIC = b"DOM"
@@ -81,6 +82,7 @@ class SaveFile:
     data: bytes
     header: SaveHeader
     battles: list[VcrSection] = field(default_factory=list)
+    _scores: list[ScoreRecord] | None = field(default=None, repr=False)
 
     @property
     def kind(self) -> str:
@@ -91,6 +93,22 @@ class SaveFile:
     @property
     def battle_count(self) -> int:
         return len(self.battles)
+
+    def scores(self) -> list[ScoreRecord]:
+        """The score-graph history: one record per nation per turn.
+
+        Present in `ftherlnd` and `.trn` files; a `.2h` carries orders only,
+        so this returns an empty list for one. The newest record lags the
+        header turn by one, because the array is appended to when the host
+        generates the following turn.
+
+        The scan is not free (~0.2s on a turn file), so the result is cached.
+        """
+        cached = self._scores
+        if cached is None:
+            cached = find_score_history(self.data)
+            self._scores = cached
+        return cached
 
     def strings(
         self,

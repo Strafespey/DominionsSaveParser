@@ -117,6 +117,119 @@ What it does **not** give you: any per-hit detail. It is a roster dump.
 
 The meaning of the `N+M` count format (e.g. `12+0 Satyr`) is not yet established.
 
+## Reaching the per-hit combat log — attempts
+
+The file provably contains no combat log (`FILE_FORMAT.md` §4), so a
+blow-by-blow narrative has to come from the engine re-simulating. The format
+strings exist:
+
+```
+damage %d on %s (unr%d), spec0x%x ba%d
+damage %d on %s (unr%d), spec0x%x(missile) ba%d
+%s attacks with %s
+Shield hit, incoming damage reduced by %d
+```
+
+**`--vcrtest` is the switch that drives a re-simulation.** Run headless it gets
+measurably far and then dies on graphics:
+
+```
+$ Dominions6.exe --nosteam --nocrashbox --textonly --vcrtest --vcrdebug -d -d -d --host <Game>
+resolving real battle (seed 13991)
+play vcr (seed 13991)
+Något gick fel!
+OpenGL error
+```
+
+Two things to read off that. It **resolves the battle and then replays it from
+the stored seed** — direct confirmation of the re-simulation design. And it
+fails on GL context creation, not on logic, so `--textonly` is the wrong
+pairing: `--textonly` is only legal with `--tcpserver`/`--host`/etc. and gives
+no renderer, while the replay path wants one.
+
+### ✅ SOLVED — the log goes to `log.txt`, not stdout
+
+```sh
+Dominions6.exe --nosteam --nocrashbox --textonly --vcrdebug -d -d -d --host <Game>
+```
+
+writes the full per-hit combat log to **`log.txt` in the game directory**.
+Wired up as `SandboxedHost.combat_log()`.
+
+This was missed for a long time because every attempt measured *stdout*, which
+stays empty — the runs looked like total failures when the data was landing in
+a file the whole time. Confirmed by hosting a T'ien Ch'i turn and watching
+`log.txt` be truncated and rewritten mid-run, then finding that game's units in
+it: 1,002 `hit ... for N points of damage` lines and 2,095 `Damage roll` lines.
+
+What it contains:
+
+```
+Damage roll 18+13 vs prot roll of 13+9 of Einhere = 9 points of damage
+Damage exceeded maximum possible in hit area, reduced to 6 points of damage
+Longdead Horseman hit Einhere in arm with Light Lance for 6 points of damage
+Einhere hit Skeletal Horse in body with Broad Sword for 11 points (target was killed)
+Longdead Velite hit Cataphracted War Horse with a ranged attack (Javelin) in the leg for 0
+hms 44, crc 45
+TickBattle 77940 +10 (bcs -183356030)
+```
+
+Every attack with hit location, weapon and outcome; the damage roll versus
+protection roll exactly as the manual describes it (p.60); fatigue damage;
+per-tick battle checksums. Note the second line — **damage is capped by the hit
+area**, a rule the manual does not state, which is why limb hits from heavy
+cavalry land so softly.
+
+⚠️ **Three caveats.**
+
+1. `log.txt` is **truncated and rewritten on every debug run**, and it lives in
+   the game directory — `DOM6_SAVE` sandboxes savegames, not this. Anything
+   previously there is destroyed.
+2. It is **large**: one hosted turn produced ~44 MB / 1.5M lines.
+3. It **hosts**, so the logged battles are the *next* turn's, freshly
+   simulated — not a replay of the battles in your current `.trn`. Same
+   limitation as `--dumpfights`.
+
+### Replaying a *past* battle — needs the viewer
+
+> **Correction.** An earlier revision said `--vcrtest` re-simulates *your*
+> stored battles. It does not. It is the engine's **self-test harness**: it
+> resolves a synthetic fight on `lnr 0` (`batmap ''`, `0 vs 5`) and then
+> replays it from the same seed to check the round checksums agree.
+
+```
+host_battle: lnr 0, xvcr -1, batmap ''
+Playvcr lnr0 def5 att0 incstle0 seed9189 checksums79     <- replayed twice, same seed
+```
+
+Useful anyway, because it **proves the replay path writes the full per-hit log**:
+that run produced a 46.8 MB `log.txt` with 2,353 `points of damage` lines. What
+it will not do is replay a battle from your `.trn`.
+
+Loading a real game windowed with debug on
+(`-w --res 640 480 --nosound --fastgrx --vcrdebug -d -d -d <GameName>`, no
+`--host`) gets the stored battle **into scope** — the log contains the turn
+message `There was a battle in Shamballac.` and 44 references to units that
+only exist in that fight — but no combat lines, because the replay only runs
+when a human opens it in the viewer.
+
+**So the working recipe for a past battle is manual:**
+
+1. Launch with `-d -d -d --vcrdebug <GameName>` (or put the flags in Steam's
+   launch options).
+2. Open **only** the battle you care about in the replay viewer, then quit.
+3. Read `log.txt` from the game directory.
+
+Watching one battle keeps the log small and unambiguous; `log.txt` is truncated
+on every launch, so anything else watched first is mixed in. Do it before
+hosting the turn — hosting discards the replay.
+
+The other untried thread is the standalone `.vcr` file: the engine both writes
+(`crvcr:`) and reads (`readvcr:`) `%s/%d_%d.vcr`, and none exist during normal
+play. `readvcr: got land %d, own %d, frtown %d, pd %d` suggests those files
+carry the province owner and PD strength at battle time — which would give a
+proper before/after outcome signal instead of the after-only province read.
+
 ## Other switches worth investigating
 
 | Switch | Note |
@@ -124,10 +237,34 @@ The meaning of the `N+M` count format (e.g. `12+0 Satyr`) is not yet established
 | `--vcrtest`, `--vcrseed=`, `--vcrrepeat` | replay-system test harness |
 | `--vcrdebug` (`-dd`) | replay debug output |
 | `--simulation`, `--simnat=`, `--simamount=`, `--simspells` | built-in battle simulator — a route to "what if" analysis |
-| `--statusdump` | writes `<save>/<game>/statusdump.txt` |
-| `--statfile` | writes `stats.txt` after each turn |
-| `--scoredump` | writes `scores.html` after each turn |
 | `-d` | increase debug level (repeatable) |
+
+## `--scoredump` — per-nation ground truth ✅ ⚠️ mutates the save
+
+Like `--dumpfights`, this only fires while the engine **hosts a turn**, so run
+it against a copy (`SandboxedHost`). It writes `<save>/<game>/scores.html`:
+
+```
+Dominions6.exe --nosteam --nocrashbox --textonly --scoredump --host <GameName>
+```
+
+Eight tables, every nation in each: **Provinces, Forts, Income, Gem Income,
+Research, Dominion, Army Size, Victory Points**.
+
+This is the single most useful switch for reverse engineering, because it is
+**labelled ground truth for every nation at once**. Searching a save for
+offsets that reproduce a whole column is what located the score-graph record
+(`FILE_FORMAT.md` §7); six simultaneous constraints leave no room for a byte
+coincidence to survive.
+
+Note you do **not** need it to read those numbers day to day — the same values
+are stored in the player's own `.trn`, and `dom6.scores` reads them there with
+no hosting and no information the player could not already see.
+
+`--statusdump` and `--statfile` also fire on host but yield very little:
+`statusdump.txt` is the nation roster plus controller flags, `stats.txt` is one
+line per nation saying whether it is AI-controlled. Neither carries statistics
+despite the names.
 
 The engine also references `%s/%d_%d.vcr` and `%s/5_0.vcr` file paths, plus a
 `%s/tmp_vpb` temp file used by `ViewProvinceBattles`. No `.vcr` files exist on

@@ -13,8 +13,15 @@ from .paths import (
     list_savegames,
     load_savegame,
 )
+from .provinces import Province, find_provinces, owner_of
 from .reader import Cursor
 from .save import SaveFile, SaveFormatError, SaveHeader, load, parse_header
+from .scores import (
+    ScoreRecord,
+    find_score_history,
+    history_for,
+    latest_by_nation,
+)
 from .vcr import MARKER as VCR_MARKER
 from .vcr import (
     UNIT_RECORD_SIZE,
@@ -36,6 +43,13 @@ __all__ = [
     "SaveFormatError",
     "load",
     "parse_header",
+    "Province",
+    "find_provinces",
+    "owner_of",
+    "ScoreRecord",
+    "find_score_history",
+    "history_for",
+    "latest_by_nation",
     "VcrSection",
     "VcrUnit",
     "VCR_MARKER",

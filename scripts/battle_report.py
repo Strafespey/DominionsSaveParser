@@ -46,6 +46,26 @@ def nation(n: int) -> str:
     return _N.get(n, f"nation {n}").split(",")[0]
 
 
+def held_by(save, battlefield: str | None) -> str:
+    """Who holds the province after the turn -- the only real outcome signal.
+
+    Inferred casualties cannot decide a battle: enemy survivors are invisible
+    in a turn file, so a defeat reads as enemy annihilation. Province ownership
+    is read from the save instead. It can be unknown, and says so.
+    """
+    from dom6.provinces import INDEPENDENT, owner_of
+
+    owner = owner_of(save, battlefield) if battlefield else None
+    if owner is None:
+        return "outcome: UNKNOWN (province record not found -- do not assume a win)"
+    if owner == save.header.nation:
+        return f"after this turn {battlefield} is HELD BY YOU"
+    if owner == INDEPENDENT:
+        return (f"after this turn {battlefield} is NOT yours "
+                f"(independent, or a province you cannot see)")
+    return f"after this turn {battlefield} is held by {nation(owner)}"
+
+
 def unit_line(type_id: int, count: int, indent: str) -> list[str]:
     m, w = tables()
     if not m:
@@ -99,11 +119,18 @@ def main() -> int:
         b = oc.battle
         print(f"\n=== {b.battlefield} — "
               f"{' vs '.join(nation(n) for n in b.nations)} ===")
+        print(f"  {held_by(save, b.battlefield)}")
         for side in oc.sides:
             mark = " (you)" if side.observable else ""
-            print(f"\n  {nation(side.nation)}{mark}: {len(side.engaged)} engaged, "
-                  f"{side.survived} survived, {len(side.lost)} lost "
-                  f"({side.loss_fraction:.0%})")
+            if side.observable:
+                print(f"\n  {nation(side.nation)}{mark}: {len(side.engaged)} engaged, "
+                      f"{side.survived} survived, {len(side.lost)} lost "
+                      f"({side.loss_fraction:.0%})")
+            else:
+                # Never print a loss percentage for a side we cannot see. A
+                # defeat hides the whole enemy army and would read as 100%.
+                print(f"\n  {nation(side.nation)}: {len(side.engaged)} engaged, "
+                      f"{len(side.lost)} no longer visible to you")
             if side.caveat:
                 print(f"    note: {side.caveat}")
             squads: dict[int, list] = {}

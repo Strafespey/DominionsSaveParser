@@ -36,13 +36,32 @@ try there.
 A third capture with a *different commander* scripted would confirm the record
 stride.
 
-### 1.2 Formation
+### 1.2 Stockpiles — treasury, gems by path, research by school ⭐
+
+The score-graph history now gives income, gem *income* and research *rate*
+(`FILE_FORMAT.md` §7), but not what you actually have banked. Those three are
+what "should I recruit or save?" turns on, and they are almost certainly stored
+per nation somewhere near each other.
+
+`--scoredump` cannot label them — it reports rates, not stocks. So this needs
+five numbers off your own screen, for a turn whose `.trn` you keep:
+
+1. **Gold** in the treasury (top bar).
+2. **Gem counts per path** — the national summary's gem inventory, all nine
+   figures including blood slaves, in order.
+3. **Research level per school**, all eight, from the research screen.
+
+With those, the same known-plaintext scan that cracked the score record should
+land them immediately: nine gem values in a row is an extremely distinctive
+signature to search for.
+
+### 1.3 Formation
 
 Same idea, cheaper. Set one squad to **Box**, save the `.2h`; change it to
 **Skirmish**, save again. Formation is per-squad and sits near the placement
 fields I already read, so one diff should be enough.
 
-### 1.3 Verify extracted stats against the game
+### 1.4 Verify extracted stats against the game
 
 I validated unit stats against invariants and the manual, but never against the
 game's own UI. If you open a unit info screen for, say, a **Militia**, a
@@ -52,14 +71,14 @@ hp / prot / att / def / mor / enc / MR, I can confirm the extraction end to end
 
 This is the highest-value check per minute of your time.
 
-### 1.4 A multiplayer turn file
+### 1.5 A multiplayer turn file
 
 Everything so far comes from a single-player game. An MP `.trn` would let me
 verify the assumption that enemy survivors are genuinely invisible — currently
 the reason enemy losses are reported as "no longer visible to you" rather than
 kills.
 
-### 1.5 A big, messy battle
+### 1.6 A big, messy battle
 
 A fight with magic, summons, afflictions and multiple commanders per side would
 stress the parser in ways your turn-9 skirmish does not.
@@ -72,6 +91,7 @@ stress the parser in ways your turn-9 skirmish does not.
 |---|---|
 | **Battle scripts** | see 1.1. Not in the 173-byte combat record; `.2h` is the likely home |
 | **Formation** | per-squad, near the placement fields |
+| Treasury / gem stock / research levels | rates are readable (`FILE_FORMAT.md` §7); stockpiles are not — see 1.2 |
 | Province records | name appears twice per record; field layout unknown |
 | Commander records | equipment slots, magic paths, experience |
 | VCR body past `+0x20` | per-round checksums, outcome data |
@@ -104,13 +124,22 @@ a qualitative "you were out-ranged".
 - **Expected-damage model.** With weapon damage + parry, compute per-round hit
   and kill probability between two unit types. Turns advice from directional to
   quantitative.
+- **Per-hit combat narrative.** Settled: the save provably does not contain one
+  (`FILE_FORMAT.md` §4 size accounting — the tail of a replay is ~5% of the
+  floor a log would need). It has to come from the engine re-simulating. Best
+  lead: the engine reads and writes **standalone `.vcr` files**
+  (`%s/%d_%d.vcr`), and replay is seed-driven (`play vcr (seed %d)`). Find what
+  makes it emit one.
 - **Matchup simulator.** The engine has `--simulation`, `--simnat`,
   `--simamount`, `--simbatspells`. Driving it sandboxed would let the advisor
   answer *"what if I had brought 20 more archers?"* empirically instead of
   arguing from stats.
 - **Outcome variance.** `--dumpfights` re-rolls each host, so hosting the same
   turn N times samples the distribution — "you were unlucky" becomes measurable.
-- **Multi-turn trends.** Army growth, losses over time, income.
+- ~~**Multi-turn trends.** Army growth, losses over time, income.~~ ✅ done —
+  the score-graph history in every save carries provinces, forts, income,
+  gem income, research, dominion and army size for every visible nation on
+  every turn. `scripts/empire_report.py`, `FILE_FORMAT.md` §7.
 - **Pre-battle warnings.** Read the `.2h` before you host and flag being
   out-ranged, length-0 melee, or a single commander leading everything.
 
@@ -118,9 +147,10 @@ a qualitative "you were out-ranged".
 
 ## 5. Tooling
 
-- Tests. There are none. The extractors have validation functions
-  (`validate_monster_stats`) but no test suite; a few golden-file tests over the
-  turn-9 save would catch regressions.
+- Tests. Two golden-file suites exist over the turn-9 fixture
+  (`tests/test_vcr_regression.py`, `tests/test_scores.py`). The game-data
+  extractors still have none — they have validation functions
+  (`validate_monster_stats`) but nothing pinning the extracted values.
 - Package properly (`pyproject.toml`) instead of `sys.path` juggling in scripts.
 - Handle Dominions patches gracefully: table layouts are re-derived at runtime
   and validated, so a patch should raise rather than return wrong data — but

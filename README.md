@@ -77,6 +77,12 @@ py scripts/inspect_save.py <GameName>           # summarise a game
 py scripts/inspect_save.py <file> --battles     # hexdump around each battle
 py scripts/inspect_save.py <file> --strings 40  # decoded strings
 
+py scripts/battle_report.py <GameName>          # order of battle and losses
+py scripts/empire_report.py <GameName>          # provinces, income, research, ...
+py scripts/empire_report.py <GameName> --history          # your own trend
+py scripts/empire_report.py <GameName> --metric income    # all nations, by turn
+py scripts/vcr_anatomy.py <GameName>            # replay size accounting
+
 py scripts/extract_reference.py                 # dump game DB to data/reference/
 ```
 
@@ -87,6 +93,10 @@ save = dom6.load(r"%APPDATA%\Dominions6\savedgames\MyGame\mid_ulm.trn")
 print(save.header.turn, save.header.nation)
 for battle in save.battles:
     print(battle.describe())
+
+# Empire statistics for every visible nation, every turn so far.
+for rec in dom6.history_for(save.scores(), save.header.nation):
+    print(rec.turn, rec.provinces, rec.income, rec.research)
 ```
 
 ## Safety
