@@ -124,12 +124,34 @@ a qualitative "you were out-ranged".
 - **Expected-damage model.** With weapon damage + parry, compute per-round hit
   and kill probability between two unit types. Turns advice from directional to
   quantitative.
-- **Per-hit combat narrative.** Settled: the save provably does not contain one
-  (`FILE_FORMAT.md` §4 size accounting — the tail of a replay is ~5% of the
-  floor a log would need). It has to come from the engine re-simulating. Best
-  lead: the engine reads and writes **standalone `.vcr` files**
-  (`%s/%d_%d.vcr`), and replay is seed-driven (`play vcr (seed %d)`). Find what
-  makes it emit one.
+- **Per-hit combat narrative.** 🟡 mostly done. Settled long ago that the save
+  does not contain one (`FILE_FORMAT.md` §4 size accounting — the tail of a
+  replay is ~5% of the floor a log would need), so it has to come from the
+  engine re-simulating.
+
+  - ✅ **The log is parsed.** `dom6/combatlog.py` turns `log.txt` into typed
+    events — hits with location/weapon/damage roll vs protection roll, the
+    hit-area cap, shield hits, repels, individual and army rout checks, casts,
+    environmental damage — plus per-unit damage/kills and an attempts-versus-
+    landed **hit rate**. The grammar was lifted from the engine's own format
+    strings, not from samples, so it covers cases the sample logs lack.
+  - ✅ **Capture is automated except for one click.** `dom6/replay.py` launches
+    the game already configured (no Steam launch options), points `DOM6_SAVE`
+    at a throwaway copy, preserves the pre-existing `log.txt`, watches for the
+    replay, and shuts down when the log stops growing.
+    `scripts/analyze_battle.py` is the CLI.
+  - ⏸️ **Opening the battle is still manual — parked deliberately.** The replay
+    only renders in the viewer, so something must click it. A record-and-replay
+    input macro is implemented (`record_macro` / `--macro`) but **has never
+    been run against a real window**; treat it as a sketch, not a feature.
+    Image-based navigation is not an option today — neither Pillow nor OpenCV
+    is installed.
+  - Remaining lead for a cleaner route: the engine reads and writes standalone
+    **`.vcr` files** (`%s/%d_%d.vcr`), and `readvcr: got land %d, own %d,
+    frtown %d, pd %d, ass %d` implies they carry province owner and PD *at
+    battle time* — which would also fix the after-only outcome read. The UI
+    path is `viewvcrs` → `gotomsg` → `playvcr nbr %d`, i.e. battles are indexed
+    as turn **messages**; no CLI switch exposes that index.
 - **Matchup simulator.** The engine has `--simulation`, `--simnat`,
   `--simamount`, `--simbatspells`. Driving it sandboxed would let the advisor
   answer *"what if I had brought 20 more archers?"* empirically instead of
@@ -148,7 +170,9 @@ a qualitative "you were out-ranged".
 ## 5. Tooling
 
 - Tests. Two golden-file suites exist over the turn-9 fixture
-  (`tests/test_vcr_regression.py`, `tests/test_scores.py`). The game-data
+  (`tests/test_vcr_regression.py`, `tests/test_scores.py`), plus
+  `tests/test_combatlog.py` (9 cases) whose sample lines are instantiations of
+  the engine's own format strings rather than invented text. The game-data
   extractors still have none — they have validation functions
   (`validate_monster_stats`) but nothing pinning the extracted values.
 - Package properly (`pyproject.toml`) instead of `sys.path` juggling in scripts.

@@ -72,11 +72,25 @@ class Engine:
 
         The executable is a GUI-subsystem binary, but it writes to inherited
         redirected handles, so piping works.
+
+        Every launch truncates `log.txt` in the game directory, including a
+        launch as harmless as ``--listnations``. That file is the only copy of
+        a captured combat log, and it costs a game launch plus a manual click
+        to produce, so it is preserved across the call. Learned the hard way:
+        looking up nation names deleted a 25 MB capture.
         """
         argv = [str(self.exe), *BASE_FLAGS, *args]
         env = dict(os.environ)
         if save_root is not None:
             env[ENV_SAVE] = str(save_root)
+
+        log_path = self.game_dir / "log.txt"
+        backup: Path | None = None
+        if log_path.exists():
+            fd, tmp = tempfile.mkstemp(prefix="dom6log_", suffix=".bak")
+            os.close(fd)
+            backup = Path(tmp)
+            shutil.copy2(log_path, backup)
 
         try:
             proc = subprocess.run(
@@ -94,6 +108,10 @@ class Engine:
                 stderr=_decode(exc.stderr),
                 timed_out=True,
             )
+        finally:
+            if backup is not None:
+                shutil.copy2(backup, log_path)
+                backup.unlink(missing_ok=True)
         return EngineResult(
             args=argv,
             returncode=proc.returncode,
