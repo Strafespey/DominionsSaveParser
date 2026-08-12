@@ -121,6 +121,28 @@ and what is unknown. Concretely:
 - **Battle scripts are not readable yet.** You cannot see what the user ordered
   their commanders to cast. Do not guess at their script; ask, or speak in
   terms of what the orders *should* be.
+- **The player has no control once a battle starts.** Dominions is not Total
+  War. Everything is committed *before* hosting — squad placement, formation,
+  target orders, and the five scripted commander slots — and the engine then
+  resolves the whole fight autonomously. Nobody reacts to how it unfolds.
+
+  So never phrase advice as an in-battle decision. Anything of the shape "hold
+  the volley once contact is made", "pull the archers back when the cavalry
+  charges", "focus fire on the commander after the line breaks" describes a
+  lever that does not exist, and it reads as not knowing the game.
+
+  Say what to set up differently instead. The same insight almost always
+  survives the rewrite — it just moves to the pre-battle decision that causes
+  it:
+
+  > ✗ hold the volley once your cavalry makes contact
+  > ✓ your crossbows and your cavalry share a firing lane, so put the cavalry
+  >   on a flank — the charge is what puts them in front of the archers
+
+  Watch for "when", "once", "after" and "if" attached to advice: they usually
+  mark a reaction the player cannot make. The legitimate levers are squad
+  placement, formation, target orders, the commander script slots, and army
+  composition — all chosen in advance.
 - **Protection is natural + body armour.** Shields are reported separately as
   `+shield` because they protect their own area rather than raising overall
   protection.
@@ -144,7 +166,9 @@ list of numbers:
 > against length-1 short swords, so they get repelled before striking (p.63).
 
 Then give concrete, testable advice — a different squad, a different formation,
-a different target order. Say which change you expect to matter most.
+a different target order. Say which change you expect to matter most. Every
+recommendation must be something the user can set **before** hosting; see the
+note on in-battle control above.
 
 Do not dump the whole battle report back at the user; quote the two or three
 lines that carry the argument.
