@@ -195,8 +195,7 @@ that same host wrote.
 | `+27` | u8 | file-global stamp — see warning below |
 | `+29` | u8 | constant per side ❓ |
 | `+55` | u8 | ✅ **owner nation id** (`0` = independents) |
-| `+57` | u8 | ✅ **squad position x**; `0xFF` = unset |
-| `+58` | u8 | ✅ **squad position y**; `0xFF` = unset |
+| `+57` | u32 | ✅ **army stack id**; `0xFFFFFFFF` = unset. *Not* a position — see below |
 | `+164` | u16 | ✅ unit number — unique per record |
 
 Grouping by `+20` reproduces the roster stacks exactly, which is what confirms
@@ -235,19 +234,43 @@ pairing. `+20 == 0xFFFF` selected exactly the 4 commanders the roster reported.
 > silently finds nothing in other files. Records are located by field
 > plausibility, requiring a run to share whatever stamp its first record has.
 
-### Squad placement — `+57` / `+58` ✅
+### Army stack id — `+57` (u32) ✅
 
-> **Correction.** An earlier revision of this document recorded placement as
-> *not present*. That was wrong: the first search looked only for fields that
-> separated cleanly **by owner**, and placement is constant **per squad**, so
-> it was filtered out before it could be seen.
+> **Correction, twice over.** The original revision recorded placement as *not
+> present*. A later revision "corrected" that and decoded `+57`/`+58` as squad
+> position x/y. **The original was right and the correction was wrong.** No
+> battlefield placement is stored anywhere in the save; the engine recomputes
+> deployment from squad, formation and orders at battle start. The bad reading
+> reached a user as a confident claim that his mage line was stacked on one
+> tile, which it was not.
 
-Bytes `+57` and `+58` hold the squad's position. `0xFF/0xFF` means unset.
+Bytes `+57`..`+60` are a little-endian **u32 army stack id** — which army a
+unit marched in with. `0xFFFFFFFF` means unset.
 
-Every member of a squad carries the same pair, and it is **consistent between
-the `.trn` and the `.2h`** — squad 5063 reads `(100, 4)` and squad 5048
-`(93, 4)` in both files, which is the check that confirms it is real stored
-state rather than a coincidence.
+Three things distinguish it from a coordinate pair:
+
+1. **The high half is degenerate.** Across every record in a turn-28
+   T'ien Ch'i `.trn`, bytes `+59`/`+60` are only ever `00 00` (308 records) or
+   `FF FF` (115). Two more coordinate bytes could not behave that way; a u32
+   holding a small id or `-1` does exactly that.
+2. **It spans squads.** At Nardago six *different* squads all read `4803`,
+   while a seventh — a detachment that arrived separately — read `3920`. As a
+   byte pair that rendered as six squads sharing the tile `(195, 18)`, which
+   is what a position field cannot mean.
+3. **Defenders read `-1`.** The entire defending side is `0xFFFFFFFF`.
+   Engine-deployed defenders have no player-assigned stack, but they
+   unquestionably have positions.
+
+The evidence once cited *for* the position reading says the same thing once
+converted: the two sides "sitting apart" at `(140, 20)` and `(82, 14)` is
+stacks `5260` and `3666`, and squads at `(100, 4)` / `(93, 4)` — which looked
+like two squads on one rank — are ids `1124` and `1117`, consecutive stack
+numbers. The `.trn`/`.2h` agreement was real; it just confirmed a stable id,
+not a placement.
+
+Regression: `tests/test_vcr_regression.py::test_stack_field_is_not_a_coordinate_pair`.
+It asserts the high half stays degenerate and that `VcrUnit.position` does not
+come back.
 
 In a battle the two sides sit apart:
 

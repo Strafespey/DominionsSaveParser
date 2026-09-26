@@ -155,9 +155,10 @@ def inspect_file(path: Path, args) -> int:
                         if o != owner:
                             continue
                         tag = "commanders" if sid == 0xFFFF else f"squad {sid}"
-                        pos = members[0].position
-                        at = f" at {pos}" if pos else ""
-                        print(f"          {tag} ({len(members)}){at}:")
+                        # Stack id, not placement -- see dom6/vcr.py:_OFF_UNIT_STACK.
+                        stack = members[0].stack_id
+                        via = f" [arrived with stack {stack}]" if stack is not None else ""
+                        print(f"          {tag} ({len(members)}){via}:")
                         counts = Counter(m.type_id for m in members)
                         for t, n in counts.most_common():
                             print(f"            {n:4d} x {monster_label(t)}")

@@ -308,6 +308,60 @@ def test_own_army_survives_across_both_battles():
         )
 
 
+def test_stack_field_is_not_a_coordinate_pair():
+    """Bytes +57.. are a u32 stack id, not an (x, y) squad position.
+
+    The byte-pair reading survived because both bytes look like plausible
+    small coordinates. What exposes it is the two bytes *above* them: across
+    every record they are only ever `00 00` or `FF FF`, i.e. the high half of
+    a u32 that is either a small id or the -1 sentinel. Real coordinates in
+    the neighbouring bytes would take many values.
+    """
+    save = _load()
+    high = {(u.raw[59], u.raw[60]) for b in save.battles for u in b.units}
+    assert high <= {(0, 0), (0xFF, 0xFF)}, (
+        f"bytes +59/+60 took values {high - {(0, 0), (0xFF, 0xFF)}}; "
+        "if these vary, the u32 stack reading is wrong"
+    )
+    assert not hasattr(save.battles[0].units[0], "position"), (
+        "VcrUnit.position is back -- no battlefield placement is stored in "
+        "the save, and reporting one invented a deployment that never existed"
+    )
+    # Squads that arrived together share the id; it is not per-squad.
+    for b in save.battles:
+        by_stack = {}
+        for u in b.units:
+            if u.stack_id is not None:
+                by_stack.setdefault(u.stack_id, set()).add(u.link)
+        assert any(len(sq) > 1 for sq in by_stack.values()), (
+            "no stack id spans more than one squad -- that would make it "
+            "indistinguishable from a per-squad field"
+        )
+
+
+def test_commander_losses_are_reported_as_unconfirmed():
+    """A commander not found afterwards is 'not seen', never 'killed'.
+
+    The survivor scan looks for 173-byte unit-array records, and commanders
+    standing on the map are not stored that way, so live commanders read as
+    casualties. This is why a White Tiger of the West that survived Nardago
+    was reported dead. Until the commander records are mapped, they must stay
+    out of the confirmed loss list and out of the loss percentage.
+    """
+    save = _load()
+    for outcome in battle_outcomes(save):
+        for side in outcome.sides:
+            assert all(not u.is_commander for u in side.lost_troops)
+            assert all(u.is_commander for u in side.lost_commanders)
+            assert len(side.lost_troops) + len(side.lost_commanders) == len(side.lost)
+            # Commanders must not leak into the confirmed-loss counter.
+            assert sum(side.losses_by_type.values()) == len(side.lost_troops)
+            # ...nor into the headline percentage.
+            troops = [u for u in side.engaged if not u.is_commander]
+            if troops:
+                assert side.loss_fraction == len(side.lost_troops) / len(troops)
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

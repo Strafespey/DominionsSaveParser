@@ -149,12 +149,33 @@ _OFF_UNIT_SQUAD = 20  # u16 squad id, 0xFFFF on commanders
 _OFF_UNIT_LINK = _OFF_UNIT_SQUAD  # backwards-compatible alias
 _OFF_UNIT_TYPE = 23  # u16, monster type id  [verified]
 _OFF_UNIT_OWNER = 55  # u8, owning nation id [verified]
-_OFF_UNIT_POS_X = 57  # u8, per-squad position; 0xFF = unset
-_OFF_UNIT_POS_Y = 58  # u8
+#: u32 stack id -- the army a unit marched in with. **This was previously
+#: decoded as an (x, y) squad position, which was wrong and produced confident
+#: nonsense about deployment.** Three observations killed the position reading:
+#:
+#:  1. Bytes +59/+60 take only two values across every record in a file --
+#:     `00 00` or `FF FF` (308 / 115 in a turn-28 T'ien Ch'i .trn). Two
+#:     independent coordinate bytes cannot behave that way; a u32 holding
+#:     either a small id or the -1 sentinel does exactly that.
+#:  2. The value is shared by every squad that arrived together, not by units
+#:     standing near each other. At Nardago six *different* squads all read
+#:     4803 while a seventh squad, a detachment that joined separately, read
+#:     3920 -- which the byte-pair reading rendered as six squads stacked on
+#:     one tile at (195, 18) and one outlier at (80, 15).
+#:  3. The whole defending side reads 0xFFFFFFFF. Defenders are deployed by
+#:     the engine, so they have no player-assigned stack -- but they certainly
+#:     have positions.
+#:
+#: The old docstring's evidence reads the same way once converted: the two
+#: sides "sitting apart" at (140, 20) and (82, 14) is stacks 5260 and 3666,
+#: and squads at (100, 4) and (93, 4) are ids 1124 and 1117 -- consecutive
+#: stack numbers, not two squads on the same rank.
+_OFF_UNIT_STACK = 57  # u32
 _OFF_UNIT_NUMBER = 164  # u16, per-game unit number
 
-#: Position bytes read this when the unit has no placement of its own.
-_POS_UNSET = 0xFF
+#: Stack field on a unit with no player-assigned stack (commanders,
+#: engine-deployed defenders).
+_STACK_UNSET = 0xFFFFFFFF
 
 
 @dataclass
@@ -181,18 +202,14 @@ class VcrUnit:
     #: Verified: grouping by this field reproduces the roster stacks exactly
     #: (15 Archer / 26 Militia / 22 Light Infantry as three separate squads).
     link: int
-    #: Placement of this unit's squad, or None when unset.
+    #: Id of the army stack this unit marched in with, or None when unset
+    #: (commanders, and defenders the engine deployed).
     #:
-    #: Shared by every member of a squad and consistent between the .trn and
-    #: the .2h (squad 5063 reads (100, 4) and squad 5048 (93, 4) in both).
-    #: In a battle the two sides sit apart -- Phaeacia's squad at (82, 14)
-    #: against Bandar Log's at (140, 20). Commanders and engine-deployed
-    #: defenders read 0xFF/0xFF.
-    #:
-    #: The coordinate space is not pinned down: it is probably the army-setup
-    #: grid the player arranges squads on, but that is not proven, so treat
-    #: the numbers as relative rather than absolute.
-    position: tuple[int, int] | None = None
+    #: ⚠️ This is **not** a battlefield position, and nothing in the save is.
+    #: Two squads sharing a stack id arrived together; it says nothing about
+    #: where either one stood. See `_OFF_UNIT_STACK` for why the earlier
+    #: (x, y) reading of these bytes was wrong.
+    stack_id: int | None = None
     raw: bytes = field(repr=False, default=b"")
 
     @property
@@ -327,7 +344,7 @@ def _read_records(data: bytes, offset: int, count: int) -> list[VcrUnit]:
     for i in range(count):
         o = offset + i * UNIT_RECORD_SIZE
         rec = data[o : o + UNIT_RECORD_SIZE]
-        px, py = rec[_OFF_UNIT_POS_X], rec[_OFF_UNIT_POS_Y]
+        stack = struct.unpack_from("<I", rec, _OFF_UNIT_STACK)[0]
         units.append(
             VcrUnit(
                 offset=o,
@@ -335,7 +352,7 @@ def _read_records(data: bytes, offset: int, count: int) -> list[VcrUnit]:
                 owner=rec[_OFF_UNIT_OWNER],
                 unit_number=struct.unpack_from("<H", rec, _OFF_UNIT_NUMBER)[0],
                 link=struct.unpack_from("<H", rec, _OFF_UNIT_LINK)[0],
-                position=None if px == _POS_UNSET and py == _POS_UNSET else (px, py),
+                stack_id=None if stack == _STACK_UNSET else stack,
                 raw=rec,
             )
         )

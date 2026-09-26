@@ -90,14 +90,47 @@ stress the parser in ways your turn-9 skirmish does not.
 | Item | Notes |
 |---|---|
 | **Battle scripts** | see 1.1. Not in the 173-byte combat record; `.2h` is the likely home |
-| **Formation** | per-squad, near the placement fields |
+| **Formation** | per-squad; location unknown (it is *not* near `+57`, which is a stack id, not placement) |
 | Treasury / gem stock / research levels | rates are readable (`FILE_FORMAT.md` §7); stockpiles are not — see 1.2 |
 | Province records | name appears twice per record; field layout unknown |
-| Commander records | equipment slots, magic paths, experience |
+| **Commander records on the map** ⭐ | equipment slots, magic paths, experience — and, blocking loss inference, *where a surviving commander is stored*. See 2.1 |
 | VCR body past `+0x20` | per-round checksums, outcome data |
 | Header `0x08/0x0A/0x12/0x16/0x1E/0x22` | `0x0A` is a per-game constant that changed 627 → 636 between turns, so not a static id |
-| Placement coordinate space | values are usable relatively; absolute meaning unproven |
+| ~~Placement coordinate space~~ | ✅ resolved as *not stored* — `+57` is an army stack id. See `FILE_FORMAT.md` |
 | Afflictions | almost certainly per-unit; not located |
+
+### 2.1 Map commander records — why loss inference is broken for commanders ⭐
+
+`battle_outcomes()` decides a unit survived by finding it again in a map unit
+array. Commanders on the map are **not** stored as the 173-byte records
+`find_unit_arrays` scans for, so surviving commanders read as casualties.
+
+Measured on the turn-28 Nardago battle (`MATC_Awake_Expander`), for the 25
+commanders the player engaged:
+
+| Method | Reported alive |
+|---|---|
+| `find_unit_arrays(min_length=2)` — what ships | 10 / 25 |
+| same at `min_length=1` | 17 / 25 |
+| targeted `(unit_number, type_id, owner)` triple search | 3 / 25 |
+| unit number present *anywhere* outside the replay bodies | **23 / 25** |
+
+The last row is the important one: the data is in the file, in a structure the
+scanner does not recognise. Dropping `min_length` to 1 is **not** the fix — it
+readmits exactly the noise the guard exists for (46 phantom "Wailing Ladies"
+in one file).
+
+Lead worth following: hits cluster around `+0x49000`–`+0x4A000` in that file
+and come in pairs **254 bytes** apart, which suggests a ~254-byte commander
+record with the unit number appearing at two offsets within it. Unit 6084
+(a General) happens to line up with the 173-byte layout at `+164` and 8087
+(a White Tiger of the West) does not, so the number is not at a fixed offset
+from the record start in both structures.
+
+Until this is mapped, `SideOutcome.lost_commanders` is reported separately and
+explicitly as *unconfirmed*, and is excluded from `loss_fraction`. This
+mattered in practice: a White Tiger of the West that survived the battle was
+reported to the player as killed.
 
 ---
 

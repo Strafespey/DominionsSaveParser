@@ -26,7 +26,8 @@ master state; `.2h` is their submitted orders.
 py scripts/battle_report.py <GameName>     # or a path to a .trn
 ```
 
-This gives you, per battle: both sides, squads with positions, every unit type
+This gives you, per battle: both sides, squads (no positions — see below),
+every unit type
 with hp / size / protection / attack / defence / morale, weapons with reach and
 range, and inferred losses.
 
@@ -146,8 +147,23 @@ and what is unknown. Concretely:
 - **Protection is natural + body armour.** Shields are reported separately as
   `+shield` because they protect their own area rather than raising overall
   protection.
-- **Squad positions are relative.** The coordinate space is not pinned down, so
-  compare positions between squads; do not treat them as absolute front/back.
+- **⚠️ There is no deployment data at all.** The save stores no battlefield
+  placement — the engine recomputes deployment from squad, formation and orders
+  when the battle starts. An earlier parser bug decoded an army *stack id* as
+  an (x, y) position, and the advisor used it to tell a player his mage line
+  was clumped on one tile when it was spread in a line. Squads sharing a stack
+  id **arrived together**; that says nothing about where they stood.
+
+  So never describe where anything was. You cannot see which squad was in
+  front, whether the mages were massed or spread, or what was flanking what.
+  If placement is what the question turns on, ask the player.
+
+- **⚠️ Commander losses are not confirmed.** The survivor scan cannot see
+  commanders standing on the map, so a live commander routinely reads as dead
+  — this reported a surviving White Tiger of the West as killed. The report
+  prints them under "commanders not accounted for"; repeat that framing, never
+  "you lost your pretender". Troop losses are reliable; commander losses are a
+  question to put to the player.
 - **DRN is open-ended 2d6** (p.13), so nothing is impossible. Never present a
   stat advantage as a guarantee, and do not blame the user for a bad outcome
   that was simply variance.

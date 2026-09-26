@@ -36,12 +36,44 @@ class SideOutcome:
         return len(self.engaged) - len(self.lost)
 
     @property
+    def lost_troops(self) -> list[VcrUnit]:
+        """Losses the survivor scan can actually vouch for."""
+        return [u for u in self.lost if not u.is_commander]
+
+    @property
+    def lost_commanders(self) -> list[VcrUnit]:
+        """Commanders not found afterwards -- **not** confirmed dead.
+
+        ⚠️ Commanders standing on the map are not stored as the 173-byte unit
+        records `find_unit_arrays` scans for, so a surviving commander is
+        routinely invisible to it and reads as a casualty. Measured on the
+        turn-28 Nardago battle: 23 of 25 engaged commanders have their unit
+        number present outside the replay bodies, yet the array scan vouched
+        for only 10 and an identity-triple search for 3. The player confirmed
+        that a commander this reported as lost -- a White Tiger of the West --
+        survived the battle.
+
+        Treat this list as "not seen afterwards, cause unknown". Mapping the
+        commander records properly is tracked in docs/ROADMAP.md.
+        """
+        return [u for u in self.lost if u.is_commander]
+
+    @property
     def losses_by_type(self) -> Counter:
-        return Counter(u.type_id for u in self.lost)
+        """Confirmed troop losses only; see `lost_commanders`."""
+        return Counter(u.type_id for u in self.lost_troops)
 
     @property
     def loss_fraction(self) -> float:
-        return len(self.lost) / len(self.engaged) if self.engaged else 0.0
+        """Troop losses over troops engaged.
+
+        Commanders are excluded on both sides of the ratio deliberately: they
+        cannot be counted reliably (see `lost_commanders`), and folding an
+        unreliable count into the headline percentage is what made an earlier
+        report state a surviving pretender as dead.
+        """
+        troops = [u for u in self.engaged if not u.is_commander]
+        return len(self.lost_troops) / len(troops) if troops else 0.0
 
     @property
     def caveat(self) -> str | None:

@@ -130,8 +130,9 @@ Battles are **not fought to the death** — they end when one side's nerve break
   Ldr 150 → +2 for ≤4; Ldr 200 → +3 for all five.
 - Mixing undead, demons, or undisciplined units into a squad: **−1 morale** each.
 
-Data: **`squad_id`** groups combatants; **`position`** gives each squad's
-placement.
+Data: **`squad_id`** groups combatants. **Placement is not in the save** — the
+engine recomputes deployment at battle start, and **`stack_id`** only says
+which army a squad marched in with. Never infer where a squad stood.
 
 ---
 

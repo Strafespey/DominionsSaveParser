@@ -137,19 +137,31 @@ def main() -> int:
             for u in side.engaged:
                 squads.setdefault(u.link, []).append(u)
             for sid, members in sorted(squads.items()):
-                pos = members[0].position
+                # No battlefield placement is printed because none is stored.
+                # Bytes +57.. are the army stack a squad arrived with, not an
+                # (x, y) tile -- see dom6/vcr.py:_OFF_UNIT_STACK.
+                stack = members[0].stack_id
                 tag = "commanders" if sid == 0xFFFF else f"squad {sid}"
-                at = f" at {pos}" if pos else ""
-                print(f"    {tag} ({len(members)}){at}")
+                via = f" [arrived with stack {stack}]" if stack is not None else ""
+                print(f"    {tag} ({len(members)}){via}")
                 for t, n in Counter(u.type_id for u in members).most_common():
                     for line in unit_line(t, n, "      "):
                         print(line)
-            if side.lost:
-                print("    losses:")
-                m, _ = tables()
+            m, _ = tables()
+            if side.lost_troops:
+                print("    troop losses:")
                 for t, n in side.losses_by_type.most_common():
                     label = m.label(t) if m else f"type {t}"
                     print(f"      -{n:3d} {label}")
+            if side.lost_commanders:
+                # Kept out of the loss list entirely: the survivor scan cannot
+                # see map commanders, so this is "not found", not "killed".
+                print("    commanders not accounted for "
+                      "(NOT confirmed dead -- see SideOutcome.lost_commanders):")
+                counts = Counter(u.type_id for u in side.lost_commanders)
+                for t, n in counts.most_common():
+                    label = m.label(t) if m else f"type {t}"
+                    print(f"      ? {n:3d} {label}")
     return 0
 
 
